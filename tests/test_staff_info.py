@@ -1,4 +1,10 @@
-from ohtk.staff_info import StaffInfo
+try:
+    from ohtk.staff_info import StaffInfo
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from ohtk.staff_info import StaffInfo
 
 test_data = {
     "staff_id": 1,

@@ -1,7 +1,14 @@
 import numpy as np 
 
-from ohtk.diagnose_info.auditory_diagnose import AuditoryDiagnose
-from ohtk.detection_info.auditory_detection import PTAResult
+try:
+    from ohtk.diagnose_info.auditory_diagnose import AuditoryDiagnose
+    from ohtk.detection_info.auditory_detection import PTAResult
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from ohtk.diagnose_info.auditory_diagnose import AuditoryDiagnose
+    from ohtk.detection_info.auditory_detection import PTAResult
 
 if __name__ == "__main__":
     data = {"L-500": 20, "L-1000": 20, "L-2000": 20, "L-3000": 20, "L-4000": 20, "L-6000": 20, "L-8000": np.nan,
