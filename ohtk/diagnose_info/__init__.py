@@ -1,0 +1,3 @@
+from ohtk.diagnose_info.auditory_diagnose import AuditoryDiagnose
+
+AuditoryDiagnose = AuditoryDiagnose
