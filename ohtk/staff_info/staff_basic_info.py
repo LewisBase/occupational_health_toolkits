@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Union
+from typing import Union, Optional
 
 
 class StaffBasicInfo(BaseModel):
@@ -11,10 +11,10 @@ class StaffBasicInfo(BaseModel):
     sex: str                                       # 性别
     age: Union[int,float]                          # 年龄
     duration: float                                # 工龄，单位年
-    smoking: Union[str, int] = None                # 是否抽烟
-    year_of_smoking: Union[float, str] = None      # 烟龄
-    cigarette_per_day: Union[float, str] = None    # 平均每天抽烟数量
-    occupational_clinic_class: str = None          # 职业健康体检类型
+    smoking: Optional[Union[str, int]] = None                # 是否抽烟
+    year_of_smoking: Optional[Union[float, str]] = None      # 烟龄
+    cigarette_per_day: Optional[Union[float, str]] = None    # 平均每天抽烟数量
+    occupational_clinic_class: Optional[str] = None          # 职业健康体检类型
 
     def __init__(self, **data):
         super().__init__(**data)

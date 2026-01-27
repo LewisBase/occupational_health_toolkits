@@ -4,7 +4,7 @@ import pickle
 from pydantic import BaseModel
 from functional import seq
 from datetime import datetime
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 from loguru import logger
 
 from ohtk.constants import AuditoryConstants
@@ -16,9 +16,9 @@ from ohtk.staff_info.staff_occhaz_info import StaffOccHazInfo
 class StaffInfo(BaseModel):
     staff_id: Union[str, int]
     staff_name: str = ""
-    staff_sex: str = None
-    staff_age: int = None
-    staff_duration: int = None
+    staff_sex: Optional[str] = None
+    staff_age: Optional[int] = None
+    staff_duration: Optional[int] = None
     staff_basic_info: Dict[int, StaffBasicInfo] = {}
     staff_health_info: Dict[int, StaffHealthInfo] = {}
     staff_occhaz_info: Dict[int, StaffOccHazInfo] = {}

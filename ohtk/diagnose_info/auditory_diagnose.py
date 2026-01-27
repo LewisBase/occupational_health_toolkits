@@ -16,7 +16,9 @@ class AuditoryDiagnose(BaseModel):
         self._build(**data)
 
     def _build(self, **kwargs):
-        pass
+        # 初始化诊断相关属性
+        # 可以根据传入的数据设置初始值
+        pass  # 当前不需要特殊初始化，保留此方法以供后续扩展
 
     @staticmethod
     def NIPTS(detection_result: PTAResult, # type: ignore

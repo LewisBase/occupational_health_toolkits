@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 from collections import defaultdict
 
 from ohtk.constants.global_constants import AuditoryNametoObject
@@ -11,9 +11,9 @@ class StaffHealthInfo(BaseModel):
     sex: str
     age: Union[int, float]
     diagnoise_type: Dict = {}
-    auditory_detection: Dict = None
+    auditory_detection: Optional[Dict] = None
     auditory_diagnose: Dict = {}
-    health_info: Dict[str, Union[str,float]] = None
+    health_info: Optional[Dict[str, Union[str, float]]] = None
     
     def __init__(self, **data):
         super().__init__(**data)

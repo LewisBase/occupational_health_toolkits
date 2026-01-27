@@ -5,14 +5,15 @@ from pathlib import Path
 # from loguru import logger
 from functional import seq
 from pydantic import BaseModel
+from typing import Optional
 
 from scipy.signal import savgol_filter
 
 
 class BaseResult(BaseModel):
     data: dict
-    x: list = None
-    y: list = None
+    x: Optional[list] = None
+    y: Optional[list] = None
     # file_path: Path = None
     # output_path: Path = None
     # file_name: str = None
