@@ -336,7 +336,7 @@ class TestStaffInfo:
         assert occhaz_info.noise_hazard_info.LAeq == 85.5
     
     def test_chinacdc_multiple_records(self):
-        """Test loading multiple ChinaCDC format records."""
+        """Test loading multiple ChinaCDC format records and building queue features."""
         from ohtk.staff_info import StaffInfo
         
         data = {
@@ -352,7 +352,15 @@ class TestStaffInfo:
         
         staff = StaffInfo(**data)
         
+        # Before calling build_queue_features, check_order should be empty
         assert len(staff.record_dates) == 3
+        assert len(staff.check_order) == 0
+        assert len(staff.days_since_first) == 0
+        
+        # Build queue features
+        staff.build_queue_features()
+        
+        # After building, check_order should be calculated
         assert len(staff.check_order) == 3
         assert len(staff.days_since_first) == 3
         
@@ -422,13 +430,13 @@ class TestStaffInfo:
         assert most_recent.month == 6
     
     def test_backward_compatibility_year_format(self):
-        """Test backward compatibility with year-based format."""
+        """Test multi-record loading with creation_date format - no auto calculation."""
         from ohtk.staff_info import StaffInfo
         
-        # This format should still work (legacy format)
+        # Updated to use creation_date format
         data = {
             "staff_id": "worker_004",
-            "record_year": [2021, 2022, 2023],
+            "creation_date": ["2021-01-01", "2022-01-01", "2023-01-01"],
             "name": ["张三", "张三", "张三"],
             "factory_name": ["工厂A", "工厂A", "工厂A"],
             "work_shop": ["车间1", "车间1", "车间1"],
@@ -442,7 +450,10 @@ class TestStaffInfo:
         
         assert staff.staff_id == "worker_004"
         assert staff.staff_name == "张三"
-        assert len(staff.record_years) == 3
+        assert len(staff.record_dates) == 3
+        # check_order and days_since_first should be empty (not auto-calculated)
+        assert len(staff.check_order) == 0
+        assert len(staff.days_since_first) == 0
     
     def test_attribute_transmission(self):
         """Test that sex/age/duration are stored only in StaffInfo."""
@@ -598,6 +609,197 @@ class TestIntegration:
         # Results should match
         assert abs(nihl_result["1234"] - auditory_nihl["1234"]) < 0.01
         assert abs(nihl_result["346"] - auditory_nihl["346"]) < 0.01
+
+
+class TestQueueFeatures:
+    """测试队列特征计算功能"""
+    
+    def test_build_queue_features_single(self):
+        """Test build_queue_features for a single StaffInfo object."""
+        from ohtk.staff_info import StaffInfo
+        
+        data = {
+            "staff_id": "queue_test_001",
+            "creation_date": ["2024-01-15", "2024-06-20", "2025-01-10"],
+            "sex": ["M", "M", "M"],
+            "age": [35, 35, 36],
+            "NIHL346": [18.5, 19.0, 20.5],
+        }
+        
+        staff = StaffInfo(**data)
+        
+        # Before calling build_queue_features, check_order should be empty
+        assert len(staff.check_order) == 0
+        assert len(staff.days_since_first) == 0
+        
+        # Build queue features
+        staff.build_queue_features()
+        
+        # After building, check_order should be calculated
+        assert len(staff.check_order) == 3
+        assert len(staff.days_since_first) == 3
+        
+        # Verify values
+        sorted_dates = sorted(staff.record_dates)
+        for idx, date in enumerate(sorted_dates):
+            assert staff.check_order[date] == idx + 1
+        
+        # First date should have days_since_first = 0
+        first_date = sorted_dates[0]
+        assert staff.days_since_first[first_date] == 0
+    
+    def test_build_queue_features_batch(self):
+        """Test build_queue_features_batch for multiple StaffInfo objects."""
+        from ohtk.staff_info import StaffInfo
+        import pandas as pd
+        
+        # Create test DataFrame
+        df = pd.DataFrame({
+            "worker_id": ["W001", "W001", "W002", "W002", "W002"],
+            "creation_date": ["2024-01-01", "2024-06-01", "2024-02-01", "2024-05-01", "2024-08-01"],
+            "sex": [1, 1, 0, 0, 0],
+            "age": [30, 30, 40, 40, 40],
+        })
+        
+        # Load batch
+        staff_dict = StaffInfo.load_batch_from_dataframe(df)
+        
+        # Before building, check_order should be empty
+        for staff in staff_dict.values():
+            assert len(staff.check_order) == 0
+        
+        # Build batch
+        StaffInfo.build_queue_features_batch(staff_dict)
+        
+        # After building, all should have check_order calculated
+        for staff in staff_dict.values():
+            assert len(staff.check_order) > 0
+            assert len(staff.days_since_first) > 0
+    
+    def test_to_analysis_dataframe(self):
+        """Test to_analysis_dataframe conversion."""
+        from ohtk.staff_info import StaffInfo
+        
+        data = {
+            "staff_id": "df_test_001",
+            "creation_date": ["2024-01-15", "2024-06-20"],
+            "sex": ["M", "M"],
+            "age": [35, 35],
+            "NIHL346": [18.5, 19.0],
+            "LAeq": [85.0, 86.0],
+        }
+        
+        staff = StaffInfo(**data)
+        staff.build_queue_features()
+        
+        df = staff.to_analysis_dataframe()
+        
+        assert len(df) == 2
+        assert "worker_id" in df.columns
+        assert "check_order" in df.columns
+        assert "days_since_first" in df.columns
+        assert df["check_order"].tolist() == [1, 2]
+    
+    def test_no_auto_calculation(self):
+        """Test that check_order and days_since_first are not auto-calculated."""
+        from ohtk.staff_info import StaffInfo
+        
+        data = {
+            "staff_id": "no_auto_test",
+            "creation_date": ["2024-01-01", "2024-02-01", "2024-03-01"],
+            "sex": ["M", "M", "M"],
+            "age": [30, 30, 30],
+        }
+        
+        staff = StaffInfo(**data)
+        
+        # These should be empty
+        assert len(staff.check_order) == 0
+        assert len(staff.days_since_first) == 0
+        
+        # record_dates should still be populated
+        assert len(staff.record_dates) == 3
+    
+    def test_explicit_check_order_preserved(self):
+        """Test that explicitly provided check_order is preserved."""
+        from ohtk.staff_info import StaffInfo
+        
+        data = {
+            "staff_id": "explicit_test",
+            "creation_date": ["2024-01-01", "2024-02-01"],
+            "sex": ["M", "M"],
+            "age": [30, 30],
+            "check_order": [10, 20],  # Explicitly provided
+            "days_since_first": [100, 200],  # Explicitly provided
+        }
+        
+        staff = StaffInfo(**data)
+        
+        # Explicitly provided values should be preserved
+        assert len(staff.check_order) == 2
+        assert len(staff.days_since_first) == 2
+
+
+class TestNIHLLabelConversion:
+    """测试 NIHL 标签转换功能"""
+    
+    def test_convert_nihl_to_labels_categorical(self):
+        """Test categorical encoding."""
+        from ohtk.utils.pta_correction import convert_nihl_to_labels
+        import numpy as np
+        
+        nihl_values = [15, 30, 48, 65]  # 正常, 轻度, 中度, 重度
+        
+        result = convert_nihl_to_labels(nihl_values, encoding="categorical")
+        
+        assert result.iloc[0] == "正常"
+        assert result.iloc[1] == "轻度"
+        assert result.iloc[2] == "中度"
+        assert result.iloc[3] == "重度"
+    
+    def test_convert_nihl_to_labels_numeric(self):
+        """Test numeric encoding."""
+        from ohtk.utils.pta_correction import convert_nihl_to_labels
+        import numpy as np
+        
+        nihl_values = [15, 30, 48, 65]  # 0, 1, 2, 3
+        
+        result = convert_nihl_to_labels(nihl_values, encoding="numeric")
+        
+        assert result[0] == 0  # 正常
+        assert result[1] == 1  # 轻度
+        assert result[2] == 2  # 中度
+        assert result[3] == 3  # 重度
+    
+    def test_convert_nihl_to_labels_boundary(self):
+        """Test boundary values."""
+        from ohtk.utils.pta_correction import convert_nihl_to_labels
+        
+        # Test exact boundary values
+        nihl_values = [25, 40, 55]
+        
+        result = convert_nihl_to_labels(nihl_values, encoding="categorical")
+        
+        # 25 should be 正常 (0-25 inclusive)
+        assert result.iloc[0] == "正常"
+        # 40 should be 轻度 (25-40 inclusive)
+        assert result.iloc[1] == "轻度"
+        # 55 should be 中度 (40-55 inclusive)
+        assert result.iloc[2] == "中度"
+    
+    def test_convert_nihl_to_labels_with_nan(self):
+        """Test NaN handling."""
+        from ohtk.utils.pta_correction import convert_nihl_to_labels
+        import numpy as np
+        import pandas as pd
+        
+        nihl_values = [20, np.nan, 50]
+        
+        result = convert_nihl_to_labels(nihl_values, encoding="categorical")
+        
+        assert result.iloc[0] == "正常"
+        assert pd.isna(result.iloc[1])  # NaN should remain NaN
+        assert result.iloc[2] == "中度"
 
 
 if __name__ == "__main__":

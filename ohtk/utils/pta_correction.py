@@ -7,6 +7,7 @@ Based on Chinese occupational health standards.
 """
 
 import numpy as np
+import pandas as pd
 from typing import Dict, Optional, Union, List
 
 # Age-based PTA correction table (Chinese standard)
@@ -278,3 +279,86 @@ def classify_hearing_loss(nihl_value: float) -> str:
         return "中度"
     else:
         return "重度"
+
+
+def convert_nihl_to_labels(
+    nihl_values: Union[pd.Series, np.ndarray, List[float]],
+    encoding: str = "categorical"
+) -> Union[pd.Series, np.ndarray]:
+    """
+    将 NIHL 连续值批量转换为分类标签
+    
+    分类规则（基于 GBZ 49-2014）:
+    - 0-25 dB: 正常 (0)
+    - 25-40 dB: 轻度听力损失 (1)
+    - 40-55 dB: 中度听力损失 (2)
+    - 55+ dB: 重度听力损失 (3)
+    
+    Args:
+        nihl_values: NIHL 连续值（Series, array, list）
+        encoding: 编码方式
+            - "categorical": 返回中文标签（"正常", "轻度", "中度", "重度"）
+            - "numeric": 返回数字标签（0, 1, 2, 3）
+            - "onehot": 返回 one-hot 编码矩阵 (4 列)
+    
+    Returns:
+        编码后的标签
+        - categorical: pd.Series (dtype=category)
+        - numeric: np.ndarray (dtype=int)
+        - onehot: np.ndarray (shape: n x 4)
+    
+    示例:
+        >>> convert_nihl_to_labels([20, 30, 45, 60])
+        0    正常
+        1    轻度
+        2    中度
+        3    重度
+        dtype: category
+        
+        >>> convert_nihl_to_labels([20, 30, 45, 60], encoding="numeric")
+        array([0, 1, 2, 3])
+    """
+    # 转换为 numpy array
+    if isinstance(nihl_values, pd.Series):
+        arr = nihl_values.values
+    elif isinstance(nihl_values, list):
+        arr = np.array(nihl_values)
+    else:
+        arr = nihl_values
+    
+    # 分类阈值
+    bins = [0, 25, 40, 55, np.inf]
+    labels_categorical = ["正常", "轻度", "中度", "重度"]
+    
+    if encoding == "categorical":
+        # 使用 pd.cut 进行分箱（返回 category 类型）
+        result = pd.cut(
+            arr, 
+            bins=bins, 
+            labels=labels_categorical, 
+            right=True,
+            include_lowest=True
+        )
+        return pd.Series(result)
+    
+    elif encoding == "numeric":
+        # 使用 np.digitize 进行分箱（返回 0-3 的整数）
+        # digitize 返回的是落入哪个 bin，需要减 1 变成 0-based
+        result = np.digitize(arr, bins=[25, 40, 55]) 
+        # 处理 NaN
+        result = np.where(np.isnan(arr), -1, result).astype(int)
+        return result
+    
+    elif encoding == "onehot":
+        # 先获取 numeric 编码
+        numeric = np.digitize(arr, bins=[25, 40, 55])
+        # 创建 one-hot 矩阵
+        n_samples = len(arr)
+        onehot = np.zeros((n_samples, 4), dtype=int)
+        for i, val in enumerate(numeric):
+            if not np.isnan(arr[i]) and 0 <= val < 4:
+                onehot[i, val] = 1
+        return onehot
+    
+    else:
+        raise ValueError(f"不支持的编码方式: {encoding}，可选: categorical, numeric, onehot")

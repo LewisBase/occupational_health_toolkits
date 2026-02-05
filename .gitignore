@@ -7,6 +7,12 @@
 **/log/
 **/catboost_info/
 **/__pycache__
+
+# Examples data (user-specific)
+examples/data/
+examples/models/
+examples/results/
+
 *.csv
 *.tsv
 *.xlsx

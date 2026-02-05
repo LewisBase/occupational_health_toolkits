@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 from pydantic import BaseModel
-from functional import seq
 from datetime import datetime
-from typing import Dict, Union, Optional, List
+from typing import Dict, Union, Optional, List, Any, ClassVar
 from loguru import logger
 
 from ohtk.staff_info.staff_basic_info import StaffBasicInfo
@@ -12,6 +11,21 @@ from ohtk.staff_info.staff_occhaz_info import StaffOccHazInfo
 
 
 class StaffInfo(BaseModel):
+    """
+    职业健康检查员工信息模型
+    
+    支持时间序列数据，自动计算 check_order 和 days_since_first。
+    
+    数据加载方式：
+    1. 直接传入字典: StaffInfo(staff_id="001", creation_date=[...], ...)
+    2. 从 DataFrame 加载: StaffInfo.load_from_dataframe(df, worker_id)
+    3. 批量加载: StaffInfo.load_batch_from_dataframe(df)
+    
+    查看支持的字段：
+        StaffInfo.get_expected_fields()
+        StaffInfo.help()
+    """
+    
     staff_id: Union[str, int]
     staff_name: str = ""
     staff_sex: Optional[str] = None
@@ -28,15 +42,58 @@ class StaffInfo(BaseModel):
     check_order: Dict[datetime, int] = {}           # Check sequence number
     days_since_first: Dict[datetime, int] = {}      # Days since first check
     
-    # Legacy support
-    record_years: list = []  # Kept for backward compatibility
-    
     conflict_attr: list = []
     current_year: int = datetime.now().year
+    
+    # ========================================
+    # 字段映射配置
+    # ========================================
+    
+    # 基础信息字段 -> StaffBasicInfo 属性映射
+    BASIC_INFO_FIELDS: ClassVar[Dict[str, str]] = {
+        "name": "name",
+        "factory_name": "factory_name",
+        "work_shop": "work_shop",
+        "work_position": "work_position",
+        "smoking": "smoking",
+        "year_of_smoking": "year_of_smoking",
+        "cigaretee_per_day": "cigarette_per_day",  # 注意拼写映射
+        "cigarette_per_day": "cigarette_per_day",
+        "occupational_clinic_class": "occupational_clinic_class",
+        "creation_province": "creation_province",
+        "creation_city": "creation_city",
+        "industry_category": "industry_category",
+        "employment_unit_unified_social_credit_code": "employment_unit_code",
+        "employment_unit_code": "employment_unit_code",
+        "examination_type_code": "examination_type_code",
+    }
+    
+    # 健康信息字段
+    HEALTH_INFO_FIELDS: ClassVar[Dict[str, str]] = {
+        "NIHL1234": "NIHL.1234",
+        "NIHL346": "NIHL.346",
+        "norm_hearing_loss": "norm_hearing_loss",
+        "high_hearing_loss": "high_hearing_loss",
+        "auditory_detection": "detection",
+        "auditory_diagnose": "diagnose",
+    }
+    
+    # 职业危害字段
+    OCCHAZ_INFO_FIELDS: ClassVar[Dict[str, str]] = {
+        "LEX_8h_LEX_40h_median": "LAeq",
+        "LAeq": "LAeq",
+        "noise_hazard_info": "noise_hazard_info",
+    }
+    
+    # StaffInfo 直接属性字段
+    STAFF_DIRECT_FIELDS: ClassVar[Dict[str, str]] = {
+        "sex": "staff_sex",
+        "age": "staff_age",
+        "duration": "staff_duration",
+    }
 
     def __init__(self, **data):
         # Extract check_order and days_since_first before Pydantic validation
-        # to avoid type errors (they may be int or list, not dict)
         _check_order_raw = data.pop("check_order", None)
         _days_since_first_raw = data.pop("days_since_first", None)
         
@@ -46,13 +103,11 @@ class StaffInfo(BaseModel):
         data["check_order"] = _check_order_raw
         data["days_since_first"] = _days_since_first_raw
         
-        # Detect data format and build accordingly
+        # Build from dates (the only supported format now)
         if "creation_date" in data or self._has_datetime_data(data):
             self._build_from_dates(**data)
-        elif "record_year" in data:
-            self._build_from_years(**data)
         else:
-            # Try to auto-detect format
+            # Try to auto-detect and build
             self._build_auto(**data)
 
     def _has_datetime_data(self, data: dict) -> bool:
@@ -68,13 +123,10 @@ class StaffInfo(BaseModel):
         if any(k in data for k in ["NIHL1234", "NIHL346", "LEX_8h_LEX_40h_median", "creation_province"]):
             self._build_from_chinacdc(**data)
         else:
-            # Default to legacy format if no specific indicators
-            logger.warning("Could not detect data format, attempting legacy build")
-            self._build_from_years(**data)
+            logger.warning("无法检测数据格式，请确保传入 creation_date 字段")
 
     def _build_from_chinacdc(self, **data):
         """Build from ChinaCDC data format (single record)."""
-        # Handle single record or list of records
         creation_date = data.get("creation_date")
         if creation_date is None:
             creation_date = datetime.now()
@@ -82,8 +134,16 @@ class StaffInfo(BaseModel):
             creation_date = pd.to_datetime(creation_date)
         
         self.record_dates = [creation_date]
-        self.check_order[creation_date] = data.get("check_order", 1)
-        self.days_since_first[creation_date] = data.get("days_since_first", 0)
+        
+        # check_order 和 days_since_first 仅在显式传入时填充
+        # 队列特征请通过 build_queue_features() 方法计算
+        check_order_val = data.get("check_order")
+        if check_order_val is not None:
+            self.check_order[creation_date] = check_order_val
+        
+        days_val = data.get("days_since_first")
+        if days_val is not None:
+            self.days_since_first[creation_date] = days_val
         
         # Extract basic info
         self.staff_sex = data.get("sex")
@@ -92,7 +152,7 @@ class StaffInfo(BaseModel):
         self.staff_age = data.get("age")
         self.staff_duration = data.get("duration")
         
-        # Build StaffBasicInfo (sex/age/duration stored only in StaffInfo)
+        # Build StaffBasicInfo
         self.staff_basic_info[creation_date] = StaffBasicInfo(
             staff_id=self.staff_id,
             creation_date=creation_date,
@@ -108,21 +168,12 @@ class StaffInfo(BaseModel):
         auditory_info = None
         nihl1234 = data.get("NIHL1234")
         nihl346 = data.get("NIHL346")
-        # Handle pandas NaN values
-        def is_valid_number(val):
-            if val is None:
-                return False
-            try:
-                return not np.isnan(val)
-            except (TypeError, ValueError):
-                return val is not None
         
-        if is_valid_number(nihl1234) or is_valid_number(nihl346):
-            # Build NIHL dict, filtering out None/NaN values
+        if self._is_valid_number(nihl1234) or self._is_valid_number(nihl346):
             nihl_dict = {}
-            if is_valid_number(nihl1234):
+            if self._is_valid_number(nihl1234):
                 nihl_dict["1234"] = float(nihl1234)
-            if is_valid_number(nihl346):
+            if self._is_valid_number(nihl346):
                 nihl_dict["346"] = float(nihl346)
             auditory_info = AuditoryHealthInfo(
                 NIHL=nihl_dict if nihl_dict else None,
@@ -134,7 +185,7 @@ class StaffInfo(BaseModel):
             auditory=auditory_info,
         )
         
-        # Build StaffOccHazInfo - use LEX_8h_LEX_40h_median as LAeq
+        # Build StaffOccHazInfo
         laeq = data.get("LEX_8h_LEX_40h_median") or data.get("LAeq")
         if laeq is not None:
             self.staff_occhaz_info[creation_date] = StaffOccHazInfo(
@@ -143,7 +194,15 @@ class StaffInfo(BaseModel):
             )
 
     def _build_from_dates(self, **data):
-        """Build from data with creation_date as index."""
+        """
+        从日期索引数据构建 StaffInfo
+        
+        注意：check_order 和 days_since_first 不会自动计算。
+        如需这些队列特征，请调用 build_queue_features() 方法。
+        
+        Args:
+            **data: 包含列表形式数据的字典，需要 creation_date 字段
+        """
         # Handle list data format
         creation_dates = data.get("creation_date", [])
         if not isinstance(creation_dates, list):
@@ -152,17 +211,20 @@ class StaffInfo(BaseModel):
         # Convert to datetime
         creation_dates = [pd.to_datetime(d) if isinstance(d, str) else d for d in creation_dates]
         
-        # Build record list
-        record_fields = [
-            "name", "factory_name", "work_shop", "work_position", "sex", "age",
-            "duration", "smoking", "year_of_smoking", "cigaretee_per_day",
-            "occupational_clinic_class", "auditory_detection", "auditory_diagnose",
-            "noise_hazard_info", "creation_province", "creation_city", 
-            "industry_category", "employment_unit_unified_social_credit_code",
-            "examination_type_code", "NIHL1234", "NIHL346", "LEX_8h_LEX_40h_median"
-        ]
+        if not creation_dates:
+            logger.warning("没有有效的 creation_date 数据")
+            return
         
-        record_data = {k: data.get(k, []) for k in record_fields if k in data}
+        # 收集所有传入的数据字段
+        all_known_fields = set(self.BASIC_INFO_FIELDS.keys()) | \
+                          set(self.HEALTH_INFO_FIELDS.keys()) | \
+                          set(self.OCCHAZ_INFO_FIELDS.keys()) | \
+                          set(self.STAFF_DIRECT_FIELDS.keys())
+        
+        record_data = {}
+        for key, value in data.items():
+            if key in all_known_fields or key in ["check_order", "days_since_first"]:
+                record_data[key] = value
         
         # Ensure all lists have same length
         max_len = len(creation_dates)
@@ -170,7 +232,7 @@ class StaffInfo(BaseModel):
             if not isinstance(v, list):
                 record_data[k] = [v] * max_len
         
-        # Sort by date
+        # Sort by date and get sorted indices
         sorted_indices = sorted(range(len(creation_dates)), key=lambda i: creation_dates[i])
         creation_dates = [creation_dates[i] for i in sorted_indices]
         for k in record_data:
@@ -179,81 +241,88 @@ class StaffInfo(BaseModel):
         
         self.record_dates = creation_dates
         
-        # Calculate time-series features
-        first_date = creation_dates[0] if creation_dates else datetime.now()
+        # ========================================
+        # check_order 和 days_since_first 仅在显式传入时填充
+        # 队列特征请通过 build_queue_features() 方法计算
+        # ========================================
+        
+        # 获取传入的 check_order 和 days_since_first（可能是 list 或 None）
+        check_order_raw = record_data.get("check_order", [])
+        days_since_first_raw = record_data.get("days_since_first", [])
+        
         for idx, date in enumerate(creation_dates):
-            self.check_order[date] = idx + 1
-            self.days_since_first[date] = (date - first_date).days
+            # check_order: 仅使用传入值
+            if check_order_raw and idx < len(check_order_raw) and check_order_raw[idx] is not None:
+                self.check_order[date] = int(check_order_raw[idx])
+            
+            # days_since_first: 仅使用传入值
+            if days_since_first_raw and idx < len(days_since_first_raw) and days_since_first_raw[idx] is not None:
+                self.days_since_first[date] = int(days_since_first_raw[idx])
         
-        # Extract common info
+        # ========================================
+        # 提取 StaffInfo 直接属性
+        # ========================================
+        
+        # sex
         if "sex" in record_data and record_data["sex"]:
-            sex_counts = pd.Series(record_data["sex"]).value_counts()
-            self.staff_sex = sex_counts.idxmax() if len(sex_counts) > 0 else None
-            if self.staff_sex:
-                self.staff_sex = "M" if self.staff_sex in ("Male", "男", "M", "m", "male", "1", 1) else "F"
+            valid_sex = [s for s in record_data["sex"] if s is not None]
+            if valid_sex:
+                sex_counts = pd.Series(valid_sex).value_counts()
+                self.staff_sex = sex_counts.idxmax()
+                if self.staff_sex:
+                    self.staff_sex = "M" if self.staff_sex in ("Male", "男", "M", "m", "male", "1", 1) else "F"
         
+        # name
         if "name" in record_data and record_data["name"]:
-            name_counts = pd.Series(record_data["name"]).value_counts()
-            self.staff_name = name_counts.idxmax() if len(name_counts) > 0 else ""
+            valid_names = [n for n in record_data["name"] if n is not None]
+            if valid_names:
+                name_counts = pd.Series(valid_names).value_counts()
+                self.staff_name = name_counts.idxmax()
         
-        # Extract age (use most recent value)
+        # age (use most recent)
         if "age" in record_data and record_data["age"]:
-            ages = [a for a in record_data["age"] if a is not None]
+            ages = [a for a in record_data["age"] if self._is_valid_number(a)]
             if ages:
-                self.staff_age = ages[-1]  # Use most recent age
+                self.staff_age = ages[-1]
         
-        # Extract duration (use most recent value)
+        # duration (use most recent)
         if "duration" in record_data and record_data["duration"]:
-            durations = [d for d in record_data["duration"] if d is not None]
+            durations = [d for d in record_data["duration"] if self._is_valid_number(d)]
             if durations:
-                self.staff_duration = durations[-1]  # Use most recent duration
+                self.staff_duration = durations[-1]
         
-        # Build info objects for each date
+        # ========================================
+        # 构建各日期的信息对象
+        # ========================================
         from ohtk.staff_info.auditory_health_info import AuditoryHealthInfo
+        
         for idx, date in enumerate(creation_dates):
             record = {k: v[idx] if idx < len(v) else None for k, v in record_data.items()}
             
-            # StaffBasicInfo (sex/age/duration stored only in StaffInfo)
-            self.staff_basic_info[date] = StaffBasicInfo(
-                staff_id=self.staff_id,
-                name=self.staff_name,
-                factory_name=record.get("factory_name"),
-                work_shop=record.get("work_shop"),
-                work_position=record.get("work_position"),
-                smoking=record.get("smoking"),
-                year_of_smoking=record.get("year_of_smoking"),
-                cigarette_per_day=record.get("cigaretee_per_day"),
-                occupational_clinic_class=record.get("occupational_clinic_class"),
-                creation_date=date,
-                creation_province=record.get("creation_province", "未知"),
-                creation_city=record.get("creation_city"),
-                industry_category=record.get("industry_category"),
-                employment_unit_code=record.get("employment_unit_unified_social_credit_code"),
-                examination_type_code=record.get("examination_type_code"),
-            )
+            # StaffBasicInfo
+            basic_kwargs = {"staff_id": self.staff_id, "creation_date": date}
+            for src_field, dst_attr in self.BASIC_INFO_FIELDS.items():
+                if src_field in record and record[src_field] is not None:
+                    basic_kwargs[dst_attr] = record[src_field]
+            if "creation_province" not in basic_kwargs:
+                basic_kwargs["creation_province"] = "未知"
             
-            # StaffHealthInfo with nested auditory info
+            self.staff_basic_info[date] = StaffBasicInfo(**basic_kwargs)
+            
+            # StaffHealthInfo
             auditory_info = None
             nihl1234 = record.get("NIHL1234")
             nihl346 = record.get("NIHL346")
-            # Handle pandas NaN values (np.isnan raises TypeError for non-numeric types)
-            def is_valid_number(val):
-                if val is None:
-                    return False
-                try:
-                    return not np.isnan(val)
-                except (TypeError, ValueError):
-                    return val is not None
             
-            if is_valid_number(nihl1234) or is_valid_number(nihl346) or record.get("auditory_detection"):
-                # Build NIHL dict, filtering out None/NaN values
+            if self._is_valid_number(nihl1234) or self._is_valid_number(nihl346) or record.get("auditory_detection"):
                 nihl_dict = {}
-                if is_valid_number(nihl1234):
+                if self._is_valid_number(nihl1234):
                     nihl_dict["1234"] = float(nihl1234)
-                if is_valid_number(nihl346):
+                if self._is_valid_number(nihl346):
                     nihl_dict["346"] = float(nihl346)
                 auditory_info = AuditoryHealthInfo(
                     detection=record.get("auditory_detection"),
+                    diagnose=record.get("auditory_diagnose"),
                     NIHL=nihl_dict if nihl_dict else None,
                 )
             self.staff_health_info[date] = StaffHealthInfo(
@@ -261,8 +330,9 @@ class StaffInfo(BaseModel):
                 auditory=auditory_info,
             )
             
+            # StaffOccHazInfo
             noise_info = record.get("noise_hazard_info")
-            laeq = record.get("LEX_8h_LEX_40h_median")
+            laeq = record.get("LEX_8h_LEX_40h_median") or record.get("LAeq")
             if noise_info or laeq:
                 if laeq and not noise_info:
                     noise_info = {"LAeq": laeq}
@@ -271,115 +341,159 @@ class StaffInfo(BaseModel):
                     noise_hazard_info=noise_info
                 )
 
-    def _build_from_years(self, **data):
-        """从年份格式数据构建（旧格式兼容）"""
-        from ohtk.staff_info.auditory_health_info import AuditoryHealthInfo
-        
-        # data中的信息应当是json形式，体检记录相关的字段下的类型为list
-        record_mesg_df = seq(data.items()).filter(lambda x: x[0] in [
-            "record_year", "name", "factory_name", "work_shop", "work_position", "sex", "age",
-            "duration", "smoking", "year_of_smoking", "cigaretee_per_day",
-            "occupational_clinic_class", "auditory_detection", "auditory_diagnose",
-            "noise_hazard_info"]).dict()
+    @staticmethod
+    def _is_valid_number(val) -> bool:
+        """检查值是否为有效数字（非 None、非 NaN）"""
+        if val is None:
+            return False
         try:
-            record_mesg_df = pd.DataFrame(
-                record_mesg_df).set_index("record_year")
-        except ValueError:
-            logger.error("列表不等长，体检记录的内容存在缺失，请检查！")
-            raise
-        # 常量信息计算与校验
-        staff_name = record_mesg_df["name"].value_counts()
-        staff_sex = record_mesg_df["sex"].value_counts()
-        staff_age = (
-            record_mesg_df["age"] - record_mesg_df.index + self.current_year).value_counts()
-        staff_duration = (
-            record_mesg_df["duration"] - record_mesg_df.index + self.current_year).value_counts()
-        for attr_name, attr in zip(["staff_name", "staff_sex", "staff_age", "staff_duration"],
-                                   [staff_name, staff_sex, staff_age, staff_duration]):
-            if len(attr) > 1:
-                logger.warning(f"注意！根据记录得到的{attr_name}不唯一！将使用频数最高的结果。")
-                self.conflict_attr.append(attr_name)
+            return not np.isnan(val)
+        except (TypeError, ValueError):
+            return val is not None
 
-        self.staff_name = staff_name.idxmax()
-        self.staff_sex = staff_sex.idxmax()
-        self.staff_age = staff_age.idxmax()
-        self.staff_duration = staff_duration.idxmax()
-
-        # 体检记录信息逐条写入
-        record_mesgs = record_mesg_df.to_dict(orient="index")
-        staff_basic_info = {}
-        staff_health_info = {}
-        staff_occhaz_info = {}
-        for record_year, record_mesg in record_mesgs.items():
-            self.record_years.append(record_year)
-            # 构建日期（用于新结构兼容）
-            record_date = datetime(record_year, 1, 1)
-            
-            # 员工基础信息构建（不再传递 sex/age/duration）
-            staff_basic_info[record_year] = StaffBasicInfo(
-                staff_id=self.staff_id,
-                name=self.staff_name,
-                factory_name=record_mesg.get("factory_name"),
-                work_shop=record_mesg.get("work_shop"),
-                work_position=record_mesg.get("work_position"),
-                smoking=record_mesg.get("smoking"),
-                year_of_smoking=record_mesg.get("year_of_smoking"),
-                cigarette_per_day=record_mesg.get("cigaretee_per_day"),
-                occupational_clinic_class=record_mesg.get("occupational_clinic_class"),
-                creation_date=record_date,
-                creation_province="未知",  # 旧格式无此字段
-            )
-            
-            # 员工健康诊断信息构建（使用嵌套结构）
-            auditory_info = None
-            if record_mesg.get("auditory_detection") or record_mesg.get("auditory_diagnose"):
-                auditory_info = AuditoryHealthInfo(
-                    detection=record_mesg.get("auditory_detection"),
-                    diagnose=record_mesg.get("auditory_diagnose"),
-                )
-            staff_health_info[record_year] = StaffHealthInfo(
-                staff_id=self.staff_id,
-                auditory=auditory_info,
-            )
-            
-            # 员工职业危害因素信息构建
-            staff_occhaz_info[record_year] = StaffOccHazInfo(
-                staff_id=self.staff_id,
-                noise_hazard_info=record_mesg.get("noise_hazard_info")
-            )
-
-        self.staff_basic_info = staff_basic_info
-        self.staff_health_info = staff_health_info
-        self.staff_occhaz_info = staff_occhaz_info
-        
-        # Also populate record_dates for consistency
-        for record_year in self.record_years:
-            date = datetime(record_year, 1, 1)
-            self.record_dates.append(date)
-            self.check_order[date] = self.record_years.index(record_year) + 1
-            first_year = min(self.record_years)
-            self.days_since_first[date] = (record_year - first_year) * 365
+    # ========================================
+    # 类方法：帮助和字段信息
+    # ========================================
 
     @classmethod
-    def load_from_dataframe(cls, df: pd.DataFrame, worker_id: str) -> "StaffInfo":
+    def get_expected_fields(cls) -> Dict[str, List[str]]:
         """
-        Load StaffInfo from a DataFrame for a specific worker.
+        获取 StaffInfo 支持的所有字段
         
-        Supports ChinaCDC data format with columns like:
-        - worker_id, creation_date, sex, age
-        - NIHL1234, NIHL346, LEX_8h_LEX_40h_median
-        - creation_province, creation_city, industry_category
+        Returns:
+            字典，按类别分组的字段列表
+        """
+        return {
+            "必需字段": ["staff_id", "creation_date"],
+            "员工直接属性": list(cls.STAFF_DIRECT_FIELDS.keys()),
+            "基础信息字段 (StaffBasicInfo)": list(cls.BASIC_INFO_FIELDS.keys()),
+            "健康信息字段 (StaffHealthInfo)": list(cls.HEALTH_INFO_FIELDS.keys()),
+            "职业危害字段 (StaffOccHazInfo)": list(cls.OCCHAZ_INFO_FIELDS.keys()),
+            "时间序列字段 (可选，自动计算)": ["check_order", "days_since_first"],
+        }
+
+    @classmethod
+    def help(cls) -> str:
+        """
+        打印 StaffInfo 的帮助信息
+        
+        Returns:
+            帮助信息字符串
+        """
+        help_text = """
+================================================================================
+StaffInfo 使用帮助
+================================================================================
+
+【概述】
+StaffInfo 是职业健康检查员工信息的统一模型，支持时间序列数据。
+
+【数据加载方式】
+
+1. 直接传入字典（单条记录）:
+   staff = StaffInfo(
+       staff_id="W001",
+       creation_date="2024-01-15",
+       sex=1, age=35, duration=10,
+       NIHL346=18.5, LAeq=85.0
+   )
+
+2. 直接传入字典（多条记录，列表形式）:
+   staff = StaffInfo(
+       staff_id="W001",
+       creation_date=["2024-01-15", "2025-01-20"],
+       sex=[1, 1], age=[35, 36],
+       NIHL346=[18.5, 20.0], LAeq=[85.0, 86.0]
+   )
+
+3. 从 DataFrame 加载单个工人:
+   staff = StaffInfo.load_from_dataframe(df, worker_id="W001")
+
+4. 批量加载多个工人:
+   staff_dict = StaffInfo.load_batch_from_dataframe(df)
+
+【支持的字段】
+"""
+        fields = cls.get_expected_fields()
+        for category, field_list in fields.items():
+            help_text += f"\n  {category}:\n"
+            for field in field_list:
+                help_text += f"    - {field}\n"
+        
+        help_text += """
+【队列数据聚合】
+check_order 和 days_since_first 不会在数据加载时自动计算。
+如需这些队列特征，请调用 build_queue_features() 方法：
+
+    # 单个工人
+    staff.build_queue_features()
+    
+    # 批量处理
+    StaffInfo.build_queue_features_batch(staff_dict)
+
+【完整工作流示例】
+
+    # 步骤 1: 加载数据
+    staff_dict = StaffInfo.load_batch_from_dataframe(df)
+    
+    # 步骤 2: 计算队列特征（check_order, days_since_first）
+    StaffInfo.build_queue_features_batch(staff_dict)
+    
+    # 步骤 3: 转换为分析用 DataFrame
+    analysis_df = StaffInfo.to_analysis_dataframe_batch(staff_dict)
+
+【字段映射】
+外部数据字段会自动映射到内部属性，例如：
+- LEX_8h_LEX_40h_median -> LAeq
+- employment_unit_unified_social_credit_code -> employment_unit_code
+- cigaretee_per_day -> cigarette_per_day
+
+查看完整映射: StaffInfo.BASIC_INFO_FIELDS, StaffInfo.HEALTH_INFO_FIELDS 等
+
+================================================================================
+"""
+        print(help_text)
+        return help_text
+
+    # ========================================
+    # 数据加载类方法
+    # ========================================
+
+    @classmethod
+    def load_from_dataframe(
+        cls, 
+        df: pd.DataFrame, 
+        worker_id: str,
+        field_mapping: Optional[Dict[str, str]] = None
+    ) -> "StaffInfo":
+        """
+        从 DataFrame 加载单个工人的 StaffInfo
         
         Args:
-            df: DataFrame containing worker records
-            worker_id: The worker ID to filter
+            df: DataFrame，包含工人记录
+            worker_id: 工人ID
+            field_mapping: 自定义字段映射 {df列名: StaffInfo字段名}
             
         Returns:
-            StaffInfo instance with time-series data
+            StaffInfo 实例
+            
+        Example:
+            # 使用默认映射
+            staff = StaffInfo.load_from_dataframe(df, "W001")
+            
+            # 使用自定义映射
+            staff = StaffInfo.load_from_dataframe(
+                df, "W001",
+                field_mapping={"my_date_col": "creation_date", "noise_level": "LAeq"}
+            )
         """
         worker_df = df[df["worker_id"] == worker_id].copy()
         if worker_df.empty:
-            raise ValueError(f"No records found for worker_id: {worker_id}")
+            raise ValueError(f"未找到 worker_id: {worker_id} 的记录")
+        
+        # 应用自定义字段映射
+        if field_mapping:
+            worker_df = worker_df.rename(columns=field_mapping)
         
         # Sort by date
         if "creation_date" in worker_df.columns:
@@ -389,54 +503,61 @@ class StaffInfo(BaseModel):
         # Build data dict
         data = {"staff_id": worker_id}
         
-        # List columns
-        list_columns = [
-            "creation_date", "sex", "age", "duration",
-            "NIHL1234", "NIHL346", "LEX_8h_LEX_40h_median",
-            "creation_province", "creation_city", "industry_category",
-            "employment_unit_unified_social_credit_code", "examination_type_code",
-            "check_order", "days_since_first"
-        ]
+        # 收集所有可能的字段
+        all_fields = (
+            ["creation_date", "check_order", "days_since_first"] +
+            list(cls.STAFF_DIRECT_FIELDS.keys()) +
+            list(cls.BASIC_INFO_FIELDS.keys()) +
+            list(cls.HEALTH_INFO_FIELDS.keys()) +
+            list(cls.OCCHAZ_INFO_FIELDS.keys())
+        )
         
-        for col in list_columns:
+        for col in all_fields:
             if col in worker_df.columns:
                 data[col] = worker_df[col].tolist()
         
         return cls(**data)
 
     @classmethod
-    def load_batch_from_dataframe(cls, df: pd.DataFrame) -> Dict[str, "StaffInfo"]:
+    def load_batch_from_dataframe(
+        cls, 
+        df: pd.DataFrame,
+        field_mapping: Optional[Dict[str, str]] = None
+    ) -> Dict[str, "StaffInfo"]:
         """
-        Load multiple StaffInfo instances from a DataFrame.
+        从 DataFrame 批量加载多个工人的 StaffInfo
         
         Args:
-            df: DataFrame containing records for multiple workers
+            df: DataFrame，包含多个工人的记录
+            field_mapping: 自定义字段映射 {df列名: StaffInfo字段名}
             
         Returns:
-            Dictionary mapping worker_id to StaffInfo instance
+            {worker_id: StaffInfo} 字典
         """
         if "worker_id" not in df.columns:
-            raise ValueError("DataFrame must contain 'worker_id' column")
+            raise ValueError("DataFrame 必须包含 'worker_id' 列")
         
         result = {}
         for worker_id in df["worker_id"].unique():
             try:
-                result[worker_id] = cls.load_from_dataframe(df, worker_id)
+                result[worker_id] = cls.load_from_dataframe(df, worker_id, field_mapping)
             except Exception as e:
-                logger.warning(f"Failed to load worker {worker_id}: {e}")
+                logger.warning(f"加载工人 {worker_id} 失败: {e}")
         
         return result
 
+    # ========================================
+    # 实例方法
+    # ========================================
+
     def get_most_recent_date(self) -> Optional[datetime]:
-        """Get the most recent record date."""
+        """获取最近一次检查日期"""
         if self.record_dates:
             return max(self.record_dates)
-        elif self.record_years:
-            return datetime(max(self.record_years), 1, 1)
         return None
 
-    def get_record_key(self, date: Optional[datetime] = None) -> Union[datetime, int, None]:
-        """Get the appropriate record key (datetime or year)."""
+    def get_record_key(self, date: Optional[datetime] = None) -> Optional[datetime]:
+        """获取记录键（日期）"""
         if date:
             if date in self.staff_basic_info:
                 return date
@@ -448,20 +569,196 @@ class StaffInfo(BaseModel):
         # Return most recent
         if self.record_dates:
             return max(self.record_dates)
-        elif self.record_years:
-            return max(self.record_years)
         return None
 
-    def _get_staff_data_for_nipts(self, **kwargs) -> tuple:
-        """Helper method to get staff data for NIPTS prediction.
+    # ========================================
+    # 队列数据聚合方法
+    # ========================================
+
+    def build_queue_features(self, force_recalculate: bool = False) -> None:
+        """
+        计算队列研究所需的时间特征
+        
+        计算内容:
+        - check_order: 按 creation_date 排序的检查序号（从 1 开始）
+        - days_since_first: 距离首次检查的天数
+        
+        Args:
+            force_recalculate: 是否强制重新计算（即使已有值）
+        
+        示例:
+            staff = StaffInfo(staff_id="W001", creation_date=[...], ...)
+            staff.build_queue_features()  # 计算队列特征
+        """
+        if not self.record_dates:
+            logger.warning(f"工人 {self.staff_id} 没有检查记录，跳过队列特征计算")
+            return
+        
+        # 确保日期已排序
+        sorted_dates = sorted(self.record_dates)
+        first_date = sorted_dates[0]
+        
+        for idx, date in enumerate(sorted_dates):
+            # check_order
+            if force_recalculate or date not in self.check_order:
+                self.check_order[date] = idx + 1
+            
+            # days_since_first
+            if force_recalculate or date not in self.days_since_first:
+                self.days_since_first[date] = (date - first_date).days
+        
+        logger.debug(f"工人 {self.staff_id} 队列特征计算完成：{len(sorted_dates)} 条记录")
+
+    @classmethod
+    def build_queue_features_batch(
+        cls,
+        staff_dict: Dict[str, "StaffInfo"],
+        force_recalculate: bool = False
+    ) -> Dict[str, "StaffInfo"]:
+        """
+        批量计算队列特征
+        
+        Args:
+            staff_dict: worker_id -> StaffInfo 映射
+            force_recalculate: 是否强制重新计算
         
         Returns:
-            tuple: (LAeq, age, sex, duration, remaining_kwargs)
+            更新后的 staff_dict（原地修改）
+        
+        示例:
+            staff_dict = StaffInfo.load_batch_from_dataframe(df)
+            StaffInfo.build_queue_features_batch(staff_dict)
         """
-        # Get the most recent record key
+        count = 0
+        for worker_id, staff in staff_dict.items():
+            staff.build_queue_features(force_recalculate)
+            count += 1
+        
+        logger.info(f"批量队列特征计算完成：处理了 {count} 个工人")
+        return staff_dict
+
+    # ========================================
+    # DataFrame 转换方法
+    # ========================================
+
+    def to_analysis_dataframe(self, include_fields: List[str] = None) -> pd.DataFrame:
+        """
+        将 StaffInfo 转换为分析用 DataFrame（单个工人）
+        
+        Args:
+            include_fields: 要包含的额外字段列表（如 ["creation_province", "creation_city"]）
+        
+        Returns:
+            DataFrame，每行一次检查记录
+        
+        包含字段:
+        - worker_id (staff_id)
+        - creation_date
+        - check_order (如果已计算)
+        - days_since_first (如果已计算)
+        - sex, age, duration (StaffInfo 属性)
+        - NIHL1234, NIHL346 (健康信息)
+        - LAeq (职业危害信息)
+        
+        示例:
+            staff.build_queue_features()  # 先计算队列特征
+            df = staff.to_analysis_dataframe()
+        """
+        if not self.record_dates:
+            logger.warning(f"工人 {self.staff_id} 没有检查记录")
+            return pd.DataFrame()
+        
+        # 检查队列特征是否已计算
+        if not self.check_order or not self.days_since_first:
+            logger.warning(
+                f"工人 {self.staff_id} 的队列特征未计算，建议先调用 build_queue_features() 方法"
+            )
+        
+        records = []
+        for date in sorted(self.record_dates):
+            record = {
+                "worker_id": self.staff_id,
+                "creation_date": date,
+                "sex": 1 if self.staff_sex == "M" else (0 if self.staff_sex == "F" else None),
+                "age": self.staff_age,
+                "duration": self.staff_duration,
+            }
+            
+            # 添加队列特征（如果已计算）
+            if self.check_order:
+                record["check_order"] = self.check_order.get(date)
+            if self.days_since_first:
+                record["days_since_first"] = self.days_since_first.get(date)
+            
+            # 从健康信息获取 NIHL
+            health_info = self.staff_health_info.get(date)
+            if health_info and health_info.auditory:
+                if health_info.auditory.NIHL:
+                    record["NIHL1234"] = health_info.auditory.NIHL.get("1234")
+                    record["NIHL346"] = health_info.auditory.NIHL.get("346")
+                record["norm_hearing_loss"] = health_info.auditory.norm_hearing_loss
+                record["high_hearing_loss"] = health_info.auditory.high_hearing_loss
+            
+            # 从职业危害信息获取 LAeq
+            occhaz_info = self.staff_occhaz_info.get(date)
+            if occhaz_info and occhaz_info.noise_hazard_info:
+                if isinstance(occhaz_info.noise_hazard_info, dict):
+                    record["LAeq"] = occhaz_info.noise_hazard_info.get("LAeq")
+                elif hasattr(occhaz_info.noise_hazard_info, "LAeq"):
+                    record["LAeq"] = occhaz_info.noise_hazard_info.LAeq
+            
+            # 从基础信息获取额外字段
+            if include_fields:
+                basic_info = self.staff_basic_info.get(date)
+                if basic_info:
+                    for field in include_fields:
+                        if hasattr(basic_info, field):
+                            record[field] = getattr(basic_info, field)
+            
+            records.append(record)
+        
+        return pd.DataFrame(records)
+
+    @classmethod
+    def to_analysis_dataframe_batch(
+        cls,
+        staff_dict: Dict[str, "StaffInfo"],
+        include_fields: List[str] = None
+    ) -> pd.DataFrame:
+        """
+        批量将多个 StaffInfo 转换为分析用 DataFrame
+        
+        Args:
+            staff_dict: worker_id -> StaffInfo 映射
+            include_fields: 要包含的额外字段列表
+        
+        Returns:
+            合并后的 DataFrame（所有工人）
+        
+        示例:
+            staff_dict = StaffInfo.load_batch_from_dataframe(df)
+            StaffInfo.build_queue_features_batch(staff_dict)
+            analysis_df = StaffInfo.to_analysis_dataframe_batch(staff_dict)
+        """
+        dfs = []
+        for worker_id, staff in staff_dict.items():
+            df = staff.to_analysis_dataframe(include_fields)
+            if not df.empty:
+                dfs.append(df)
+        
+        if not dfs:
+            logger.warning("没有有效的数据可转换")
+            return pd.DataFrame()
+        
+        result = pd.concat(dfs, ignore_index=True)
+        logger.info(f"批量转换完成：{len(staff_dict)} 个工人，{len(result)} 条记录")
+        return result
+
+    def _get_staff_data_for_nipts(self, **kwargs) -> tuple:
+        """获取 NIPTS 预测所需的员工数据"""
         recent_key = self.get_record_key()
         
-        # Try to get LAeq
+        # LAeq
         LAeq = kwargs.pop("LAeq", None)
         if LAeq is None and recent_key is not None:
             occhaz_info = self.staff_occhaz_info.get(recent_key)
@@ -471,30 +768,18 @@ class StaffInfo(BaseModel):
                 elif isinstance(occhaz_info.noise_hazard_info, dict):
                     LAeq = occhaz_info.noise_hazard_info.get('LAeq')
         
-        # Try to get age
+        # age
         age = kwargs.pop("age", None)
-        if age is None and recent_key is not None:
-            basic_info = self.staff_basic_info.get(recent_key)
-            if basic_info:
-                age = basic_info.age
         if age is None:
             age = self.staff_age
         
-        # Try to get sex
+        # sex
         sex = kwargs.pop("sex", None)
-        if sex is None and recent_key is not None:
-            basic_info = self.staff_basic_info.get(recent_key)
-            if basic_info:
-                sex = basic_info.sex
         if sex is None:
             sex = self.staff_sex
         
-        # Try to get duration
+        # duration
         duration = kwargs.pop("duration", None)
-        if duration is None and recent_key is not None:
-            basic_info = self.staff_basic_info.get(recent_key)
-            if basic_info:
-                duration = basic_info.duration
         if duration is None:
             duration = self.staff_duration
         
@@ -506,90 +791,45 @@ class StaffInfo(BaseModel):
                                    mean_key: list = None,
                                    standard: str = "Chinese",
                                    **kwargs) -> float:
-        """根据ISO 1999:2013标准预测噪声性永久阈移(NIPTS)
-        
-        便捷接口，委托给 AuditoryDiagnose.predict_NIPTS_iso1999_2013()
-        
-        Args:
-            Hs: 是否考虑基底听力损失
-            percentrage: 百分位数，默认50
-            mean_key: 频率列表，默认[3000, 4000, 6000]
-            standard: 标准类型，"Chinese"或其他
-            **kwargs: 可选参数，如LAeq, age, sex, duration, NH_limit
-            
-        Returns:
-            float: 预测的NIPTS值
-            
-        Raises:
-            ValueError: 当缺少必要数据时
-        """
+        """根据ISO 1999:2013标准预测噪声性永久阈移(NIPTS)"""
         from ohtk.diagnose_info import AuditoryDiagnose
         
         if mean_key is None:
             mean_key = [3000, 4000, 6000]
         
-        # Get staff data using helper method
         LAeq, age, sex, duration, remaining_kwargs = self._get_staff_data_for_nipts(**kwargs)
         NH_limit = remaining_kwargs.pop("NH_limit", True)
 
-        # Check if required data is available
         if LAeq is None or age is None or sex is None or duration is None:
-            raise ValueError("Required data (LAeq, age, sex, or duration) is missing for NIPTS prediction")
+            raise ValueError("NIPTS 预测需要 LAeq, age, sex, duration 数据")
 
         return AuditoryDiagnose.predict_NIPTS_iso1999_2013(
-            LAeq=LAeq,
-            age=age,
-            sex=sex,
-            duration=duration,
-            Hs=Hs,
-            percentrage=percentrage,
-            mean_key=mean_key,
-            standard=standard,
-            NH_limit=NH_limit
+            LAeq=LAeq, age=age, sex=sex, duration=duration,
+            Hs=Hs, percentrage=percentrage, mean_key=mean_key,
+            standard=standard, NH_limit=NH_limit
         )
 
     def NIPTS_predict_iso1999_2023(self,
                                    percentrage: int = 50,
                                    mean_key: list = None,
                                    **kwargs) -> float:
-        """根据ISO 1999:2023标准预测噪声性永久阈移(NIPTS)
-        
-        便捷接口，委托给 AuditoryDiagnose.predict_NIPTS_iso1999_2023()
-        
-        Args:
-            percentrage: 百分位数，默认50
-            mean_key: 频率列表，默认[3000, 4000, 6000]
-            **kwargs: 可选参数，如LAeq, age, sex, duration, extrapolation, NH_limit
-            
-        Returns:
-            float: 预测的NIPTS值
-            
-        Raises:
-            ValueError: 当缺少必要数据时
-        """
+        """根据ISO 1999:2023标准预测噪声性永久阈移(NIPTS)"""
         from ohtk.diagnose_info import AuditoryDiagnose
         
         if mean_key is None:
             mean_key = [3000, 4000, 6000]
         
-        # Get staff data using helper method
         LAeq, age, sex, duration, remaining_kwargs = self._get_staff_data_for_nipts(**kwargs)
         extrapolation = remaining_kwargs.pop("extrapolation", None)
         NH_limit = remaining_kwargs.pop("NH_limit", True)
 
-        # Check if required data is available
         if LAeq is None or age is None or sex is None or duration is None:
-            raise ValueError("Required data (LAeq, age, sex, or duration) is missing for NIPTS prediction")
+            raise ValueError("NIPTS 预测需要 LAeq, age, sex, duration 数据")
 
         return AuditoryDiagnose.predict_NIPTS_iso1999_2023(
-            LAeq=LAeq,
-            age=age,
-            sex=sex,
-            duration=duration,
-            percentrage=percentrage,
-            mean_key=mean_key,
-            extrapolation=extrapolation,
-            NH_limit=NH_limit
+            LAeq=LAeq, age=age, sex=sex, duration=duration,
+            percentrage=percentrage, mean_key=mean_key,
+            extrapolation=extrapolation, NH_limit=NH_limit
         )
 
     def calculate_auditory_nihl(
@@ -598,44 +838,21 @@ class StaffInfo(BaseModel):
         freq_keys: List[str] = None,
         apply_correction: bool = False
     ) -> Dict[str, float]:
-        """
-        计算指定日期的听力 NIHL 值
-        
-        便捷方法，自动注入 staff_sex/staff_age 到 AuditoryHealthInfo.calculate_NIHL()
-        
-        Args:
-            date: 体检日期，默认使用最近一次
-            freq_keys: 频率键列表，如 ["1234", "346"]
-            apply_correction: 是否应用年龄校正
-            
-        Returns:
-            {"1234": float, "346": float}
-        """
+        """计算指定日期的听力 NIHL 值"""
         if freq_keys is None:
             freq_keys = ["1234", "346"]
             
-        # Get record key
         record_key = self.get_record_key(date)
         if record_key is None:
-            raise ValueError("No health record found")
+            raise ValueError("未找到健康记录")
         
         health_info = self.staff_health_info.get(record_key)
         if health_info is None or health_info.auditory is None:
-            raise ValueError(f"No auditory health info found for date {record_key}")
-        
-        # Get age for this record (adjust based on record date)
-        age = self.staff_age
-        if age is not None and isinstance(record_key, datetime):
-            # Adjust age based on how many years have passed since first record
-            first_date = min(self.record_dates) if self.record_dates else record_key
-            years_diff = (record_key - first_date).days // 365
-            # If we have time series, the age might need adjustment
-            # This is a simplification; in practice, age should be calculated from birth date
+            raise ValueError(f"未找到 {record_key} 的听力健康信息")
         
         return health_info.auditory.calculate_NIHL(
             sex=self.staff_sex,
-            age=age,
+            age=self.staff_age,
             freq_keys=freq_keys,
             apply_correction=apply_correction
         )
-
