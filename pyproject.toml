@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ohtk"
+version = "0.2.0"
+description = "A framework for occupational health toolkits"
+authors = [{name = "LiuHengjiang", email = "liuhengjiang@outlook.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "catboost",
+    "einops==0.8.1",
+    "loguru",
+    "matplotlib",
+    "mlxtend==0.23.4",
+    "numpy",
+    "pandas",
+    "plotly==6.1.2",
+    "prophe",
+    "pydantic==2.11.7",
+    "pyfunctional==1.5.0",
+    "scikit_learn",
+    "scipy",
+    "seaborn",
+    "setuptools==78.1.1",
+    "statsmodels",
+    "torch==2.7.1",
+    "torchmetrics==1.7.3",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "flake8",
+    "isort",
+    "mypy",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

@@ -2,19 +2,19 @@ import numpy as np
 from loguru import logger
 from time import sleep
 from functional import seq
-from typing import Union
+from typing import Union, Optional
 
 from ohtk.detection_info.point_result import PointResult
 
 
 class PTAResult(PointResult):
-    left_ear_data: dict = None
-    right_ear_data: dict = None
+    left_ear_data: Optional[dict] = None
+    right_ear_data: Optional[dict] = None
     better_ear: str = "Right"
-    better_ear_data: dict = None
-    poorer_ear: str = None
-    poorer_ear_data: dict = None
-    mean_ear_data: dict = None
+    better_ear_data: Optional[dict] = None
+    poorer_ear: Optional[str] = None
+    poorer_ear_data: Optional[dict] = None
+    mean_ear_data: Optional[dict] = None
     # mean_key: Union[list, dict] = None
 
     def __init__(self, **data):

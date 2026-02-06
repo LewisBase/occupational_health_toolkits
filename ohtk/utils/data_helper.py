@@ -82,9 +82,7 @@ def get_categorical_indicies(X: pd.DataFrame) -> list:
     """
     cats = []
     for col in X.columns:
-        if is_numeric_dtype(X[col]):
-            pass
-        else:
+        if not is_numeric_dtype(X[col]):
             cats.append(col)
     cat_indicies = []
     for col in cats:
