@@ -14,23 +14,33 @@ logger = logging.getLogger(__name__)
 
 class AuditoryDiagnose(BaseModel):
     """
-    听力诊断类 - 提供 NIHL 计算和 NIPTS 预测的静态方法
+    听力诊断类 - 提供 NIHL 计算和 NIPTS 分析的静态方法
+    
+    【重要说明】此类中的方法将逐步废弃，建议使用新架构：
+    - NIHL 计算 → 使用 ohtk.diagnose_info.nihl_predictor
+    - NIPTS 预测 → 使用 ohtk.diagnose_info.nipts_predictor
     
     主要功能:
-    - NIHL(): 计算噪声性听力损失指标
-    - NIPTS(): 计算实际噪声性永久阈移
+    - calculate_observed_NIPTS(): 计算观测到的实际NIPTS（从PTA减去年龄标准值）
+    - calculate_NIHL(): 计算噪声性听力损失指标
+    - calculate_all_NIHL(): 计算所有频率组合的NIHL
     - predict_NIPTS_iso1999_2013(): 基于 ISO 1999:2013 预测 NIPTS
     - predict_NIPTS_iso1999_2023(): 基于 ISO 1999:2023 预测 NIPTS
+    
+    【已废弃的方法名】:
+    - NIPTS() → 请使用 calculate_observed_NIPTS()
+    - NIHL() → 请使用 calculate_NIHL()
+    - NIHL_all() → 请使用 calculate_all_NIHL()
     """
 
     @staticmethod
-    def NIPTS(detection_result: PTAResult, # type: ignore
-              sex: str, age: int,
-              percentrage: int = 50,
-              mean_key: Union[list, dict] = [3000, 4000, 6000],
-              NIPTS_diagnose_strategy: str = "better",
-              standard: str = "Chinese",
-              **kwargs):
+    def calculate_observed_NIPTS(detection_result: PTAResult, # type: ignore
+                                  sex: str, age: int,
+                                  percentrage: int = 50,
+                                  mean_key: Union[list, dict] = [3000, 4000, 6000],
+                                  NIPTS_diagnose_strategy: str = "better",
+                                  standard: str = "Chinese",
+                                  **kwargs):
         if NIPTS_diagnose_strategy == "better":
             diagnose_ear_data = detection_result.better_ear_data
         elif NIPTS_diagnose_strategy == "left":
@@ -73,9 +83,21 @@ class AuditoryDiagnose(BaseModel):
         except TypeError:
             raise TypeError("Better ear data is incompleted!!!")
         return NIPTS
+    
+    @staticmethod
+    def NIPTS(*args, **kwargs):
+        """
+        【已废弃】请使用 calculate_observed_NIPTS() 代替
+        
+        此方法保留用于向后兼容，将在未来版本中移除
+        """
+        logger.warning(
+            "AuditoryDiagnose.NIPTS() 已废弃，请使用 calculate_observed_NIPTS() 代替"
+        )
+        return AuditoryDiagnose.calculate_observed_NIPTS(*args, **kwargs)
 
     @staticmethod
-    def NIHL(
+    def calculate_NIHL(
         ear_data: Dict[str, float],
         freq_key: str = "346",
         age: Optional[int] = None,
@@ -108,7 +130,19 @@ class AuditoryDiagnose(BaseModel):
         )
 
     @staticmethod
-    def NIHL_all(
+    def NIHL(*args, **kwargs) -> float:
+        """
+        【已废弃】请使用 calculate_NIHL() 代替
+        
+        此方法保留用于向后兼容，将在未来版本中移除
+        """
+        logger.warning(
+            "AuditoryDiagnose.NIHL() 已废弃，请使用 calculate_NIHL() 代替"
+        )
+        return AuditoryDiagnose.calculate_NIHL(*args, **kwargs)
+
+    @staticmethod
+    def calculate_all_NIHL(
         ear_data: Dict[str, float],
         age: Optional[int] = None,
         sex: Optional[str] = None,
@@ -132,6 +166,18 @@ class AuditoryDiagnose(BaseModel):
             sex=sex,
             apply_correction=apply_correction
         )
+    
+    @staticmethod
+    def NIHL_all(*args, **kwargs) -> Dict[str, float]:
+        """
+        【已废弃】请使用 calculate_all_NIHL() 代替
+        
+        此方法保留用于向后兼容，将在未来版本中移除
+        """
+        logger.warning(
+            "AuditoryDiagnose.NIHL_all() 已废弃，请使用 calculate_all_NIHL() 代替"
+        )
+        return AuditoryDiagnose.calculate_all_NIHL(*args, **kwargs)
 
     @staticmethod
     def predict_NIPTS_iso1999_2013(
