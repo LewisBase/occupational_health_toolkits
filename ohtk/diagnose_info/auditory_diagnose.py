@@ -84,17 +84,6 @@ class AuditoryDiagnose(BaseModel):
             raise TypeError("Better ear data is incompleted!!!")
         return NIPTS
     
-    @staticmethod
-    def NIPTS(*args, **kwargs):
-        """
-        【已废弃】请使用 calculate_observed_NIPTS() 代替
-        
-        此方法保留用于向后兼容，将在未来版本中移除
-        """
-        logger.warning(
-            "AuditoryDiagnose.NIPTS() 已废弃，请使用 calculate_observed_NIPTS() 代替"
-        )
-        return AuditoryDiagnose.calculate_observed_NIPTS(*args, **kwargs)
 
     @staticmethod
     def calculate_NIHL(
@@ -129,17 +118,6 @@ class AuditoryDiagnose(BaseModel):
             apply_correction=apply_correction
         )
 
-    @staticmethod
-    def NIHL(*args, **kwargs) -> float:
-        """
-        【已废弃】请使用 calculate_NIHL() 代替
-        
-        此方法保留用于向后兼容，将在未来版本中移除
-        """
-        logger.warning(
-            "AuditoryDiagnose.NIHL() 已废弃，请使用 calculate_NIHL() 代替"
-        )
-        return AuditoryDiagnose.calculate_NIHL(*args, **kwargs)
 
     @staticmethod
     def calculate_all_NIHL(
@@ -167,17 +145,6 @@ class AuditoryDiagnose(BaseModel):
             apply_correction=apply_correction
         )
     
-    @staticmethod
-    def NIHL_all(*args, **kwargs) -> Dict[str, float]:
-        """
-        【已废弃】请使用 calculate_all_NIHL() 代替
-        
-        此方法保留用于向后兼容，将在未来版本中移除
-        """
-        logger.warning(
-            "AuditoryDiagnose.NIHL_all() 已废弃，请使用 calculate_all_NIHL() 代替"
-        )
-        return AuditoryDiagnose.calculate_all_NIHL(*args, **kwargs)
 
     @staticmethod
     def predict_NIPTS_iso1999_2013(

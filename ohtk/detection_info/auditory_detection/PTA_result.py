@@ -62,8 +62,9 @@ class PTAResult(PointResult):
         # 对mean_key进行转换
         if isinstance(mean_key, list):
             mean_key = dict(zip(mean_key, [1/len(mean_key)]*len(mean_key)))
-        else:
-            mean_key = mean_key
+        elif mean_key is None:
+            # 默认使用所有可用频率
+            mean_key = {500: 1/6, 1000: 1/6, 2000: 1/6, 3000: 1/6, 4000: 1/6, 6000: 1/6}
         ## mean_key权重归一化
         mean_key = seq(mean_key.items()).map(lambda x: (x[0], x[1]/sum(mean_key.values()))).dict()
 
@@ -113,8 +114,9 @@ class PTAResult(PointResult):
         # 对mean_key进行转换
         if isinstance(mean_key, list):
             mean_key = dict(zip(mean_key, [1/len(mean_key)]*len(mean_key)))
-        else:
-            mean_key = mean_key
+        elif mean_key is None:
+            # 默认使用所有可用频率
+            mean_key = {500: 1/6, 1000: 1/6, 2000: 1/6, 3000: 1/6, 4000: 1/6, 6000: 1/6}
         ## mean_key权重归一化
         mean_key = seq(mean_key.items()).map(lambda x: (x[0], x[1]/sum(mean_key.values()))).dict()
         if mean_key:
@@ -133,8 +135,9 @@ class PTAResult(PointResult):
         # 对mean_key进行转换
         if isinstance(mean_key, list):
             mean_key = dict(zip(mean_key, [1/len(mean_key)]*len(mean_key)))
-        else:
-            mean_key = mean_key
+        elif mean_key is None:
+            # 默认使用所有可用频率
+            mean_key = {500: 1/6, 1000: 1/6, 2000: 1/6, 3000: 1/6, 4000: 1/6, 6000: 1/6}
         ## mean_key权重归一化
         mean_key = seq(mean_key.items()).map(lambda x: (x[0], x[1]/sum(mean_key.values()))).dict()
 
@@ -184,8 +187,9 @@ class PTAResult(PointResult):
         # 对mean_key进行转换
         if isinstance(mean_key, list):
             mean_key = dict(zip(mean_key, [1/len(mean_key)]*len(mean_key)))
-        else:
-            mean_key = mean_key
+        elif mean_key is None:
+            # 默认使用所有可用频率
+            mean_key = {500: 1/6, 1000: 1/6, 2000: 1/6, 3000: 1/6, 4000: 1/6, 6000: 1/6}
         ## mean_key权重归一化
         mean_key = seq(mean_key.items()).map(lambda x: (x[0], x[1]/sum(mean_key.values()))).dict()
         if mean_key:
@@ -200,8 +204,9 @@ class PTAResult(PointResult):
         # 对mean_key进行转换
         if isinstance(mean_key, list):
             mean_key = dict(zip(mean_key, [1/len(mean_key)]*len(mean_key)))
-        else:
-            mean_key = mean_key
+        elif mean_key is None:
+            # 默认使用所有可用频率
+            mean_key = {500: 1/6, 1000: 1/6, 2000: 1/6, 3000: 1/6, 4000: 1/6, 6000: 1/6}
         ## mean_key权重归一化
         mean_key = seq(mean_key.items()).map(lambda x: (x[0], x[1]/sum(mean_key.values()))).dict()
 

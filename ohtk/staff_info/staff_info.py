@@ -169,7 +169,28 @@ class StaffInfo(BaseModel):
         nihl1234 = data.get("NIHL1234")
         nihl346 = data.get("NIHL346")
         
-        if self._is_valid_number(nihl1234) or self._is_valid_number(nihl346):
+        # 收集原始听力检测数据
+        ear_data = {}
+        for ear, prefix in [('left', 'L'), ('right', 'R')]:
+            for freq in [500, 1000, 2000, 3000, 4000, 6000]:
+                # 支持多种列名格式: L-500, L_500, left_ear_500 等
+                possible_keys = [
+                    f'{prefix}-{freq}',
+                    f'{prefix}_{freq}',
+                    f'{ear}_ear_{freq}',
+                    f'{prefix}{freq}'
+                ]
+                for key in possible_keys:
+                    if key in data and data[key] is not None:
+                        ear_data[f'{prefix}-{freq}'] = data[key]
+                        break
+        
+        # 构建 detection 数据
+        detection = None
+        if ear_data:
+            detection = {"PTA": ear_data}
+        
+        if self._is_valid_number(nihl1234) or self._is_valid_number(nihl346) or detection:
             nihl_dict = {}
             if self._is_valid_number(nihl1234):
                 nihl_dict["1234"] = float(nihl1234)
@@ -179,6 +200,8 @@ class StaffInfo(BaseModel):
                 NIHL=nihl_dict if nihl_dict else None,
                 norm_hearing_loss=data.get("norm_hearing_loss"),
                 high_hearing_loss=data.get("high_hearing_loss"),
+                detection=detection,
+                ear_data=ear_data if ear_data else None,
             )
         self.staff_health_info[creation_date] = StaffHealthInfo(
             staff_id=self.staff_id,
@@ -224,6 +247,9 @@ class StaffInfo(BaseModel):
         record_data = {}
         for key, value in data.items():
             if key in all_known_fields or key in ["check_order", "days_since_first"]:
+                record_data[key] = value
+            # 收集听力数据字段
+            if key.startswith(('L-', 'R-', 'left_ear_', 'right_ear_')):
                 record_data[key] = value
         
         # Ensure all lists have same length
@@ -274,10 +300,11 @@ class StaffInfo(BaseModel):
         
         # name
         if "name" in record_data and record_data["name"]:
-            valid_names = [n for n in record_data["name"] if n is not None]
+            valid_names = [n for n in record_data["name"] if n is not None and n != ""]
             if valid_names:
                 name_counts = pd.Series(valid_names).value_counts()
-                self.staff_name = name_counts.idxmax()
+                if not name_counts.empty:
+                    self.staff_name = name_counts.idxmax()
         
         # age (use most recent)
         if "age" in record_data and record_data["age"]:
@@ -303,7 +330,11 @@ class StaffInfo(BaseModel):
             basic_kwargs = {"staff_id": self.staff_id, "creation_date": date}
             for src_field, dst_attr in self.BASIC_INFO_FIELDS.items():
                 if src_field in record and record[src_field] is not None:
-                    basic_kwargs[dst_attr] = record[src_field]
+                    value = record[src_field]
+                    # 处理 NaN 值
+                    if isinstance(value, float) and np.isnan(value):
+                        continue
+                    basic_kwargs[dst_attr] = value
             if "creation_province" not in basic_kwargs:
                 basic_kwargs["creation_province"] = "未知"
             
@@ -314,16 +345,41 @@ class StaffInfo(BaseModel):
             nihl1234 = record.get("NIHL1234")
             nihl346 = record.get("NIHL346")
             
-            if self._is_valid_number(nihl1234) or self._is_valid_number(nihl346) or record.get("auditory_detection"):
+            # 收集原始听力检测数据
+            ear_data = {}
+            for ear, prefix in [('left', 'L'), ('right', 'R')]:
+                for freq in [500, 1000, 2000, 3000, 4000, 6000]:
+                    possible_keys = [
+                        f'{prefix}-{freq}',
+                        f'{prefix}_{freq}',
+                        f'{ear}_ear_{freq}',
+                        f'{prefix}{freq}'
+                    ]
+                    for key in possible_keys:
+                        if key in record and record[key] is not None:
+                            value = record[key]
+                            # 处理 NaN
+                            if isinstance(value, float) and np.isnan(value):
+                                continue
+                            ear_data[f'{prefix}-{freq}'] = value
+                            break
+            
+            # 构建 detection 数据
+            detection = None
+            if ear_data:
+                detection = {"PTA": ear_data}
+            
+            if self._is_valid_number(nihl1234) or self._is_valid_number(nihl346) or detection:
                 nihl_dict = {}
                 if self._is_valid_number(nihl1234):
                     nihl_dict["1234"] = float(nihl1234)
                 if self._is_valid_number(nihl346):
                     nihl_dict["346"] = float(nihl346)
                 auditory_info = AuditoryHealthInfo(
-                    detection=record.get("auditory_detection"),
+                    detection=detection,
                     diagnose=record.get("auditory_diagnose"),
                     NIHL=nihl_dict if nihl_dict else None,
+                    ear_data=ear_data if ear_data else None,
                 )
             self.staff_health_info[date] = StaffHealthInfo(
                 staff_id=self.staff_id,
@@ -487,9 +543,18 @@ check_order 和 days_since_first 不会在数据加载时自动计算。
                 field_mapping={"my_date_col": "creation_date", "noise_level": "LAeq"}
             )
         """
-        worker_df = df[df["worker_id"] == worker_id].copy()
+        # 支持 staff_id 或 worker_id 列
+        id_column = None
+        if "staff_id" in df.columns:
+            id_column = "staff_id"
+        elif "worker_id" in df.columns:
+            id_column = "worker_id"
+        else:
+            raise ValueError("DataFrame 必须包含 'staff_id' 或 'worker_id' 列")
+        
+        worker_df = df[df[id_column] == worker_id].copy()
         if worker_df.empty:
-            raise ValueError(f"未找到 worker_id: {worker_id} 的记录")
+            raise ValueError(f"未找到 {id_column}: {worker_id} 的记录")
         
         # 应用自定义字段映射
         if field_mapping:
@@ -514,6 +579,11 @@ check_order 和 days_since_first 不会在数据加载时自动计算。
         
         for col in all_fields:
             if col in worker_df.columns:
+                data[col] = worker_df[col].tolist()
+        
+        # 收集听力数据字段 (L-500, R-500, etc.)
+        for col in worker_df.columns:
+            if col.startswith(('L-', 'R-', 'left_ear_', 'right_ear_')):
                 data[col] = worker_df[col].tolist()
         
         return cls(**data)
