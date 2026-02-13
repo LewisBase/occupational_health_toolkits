@@ -105,7 +105,7 @@ class AuditoryHealthInfo(BaseModel):
         
         result = {}
         for freq_key in freq_keys:
-            value = AuditoryDiagnose.NIHL(
+            value = AuditoryDiagnose.calculate_NIHL(
                 ear_data=self.ear_data,
                 freq_key=freq_key,
                 age=age,

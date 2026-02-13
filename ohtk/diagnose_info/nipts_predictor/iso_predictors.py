@@ -173,10 +173,14 @@ class ISO1999_2023Predictor(BaseNIPTSPredictor):
         if mean_key is None:
             mean_key = [3000, 4000, 6000]
         
-        # 标准化输入参数
+        # 标准化输入参数（符合 ISO 1999:2023 标准）
+        # 年龄范围：20-70岁，低于20岁设为21，高于70岁设为70
         age = 21 if age <= 20 else age
         age = 70 if age > 70 else age
+        # 工龄范围：1-40年，超过40年设为40
         duration = 40 if duration > 40 else duration
+        # 开始接噪年龄：标准假设最早从20岁开始接噪
+        # 如果 age - duration < 20，调整 duration = age - 20
         duration = age - 20 if age - duration < 20 else duration
         sex_str = self._normalize_sex(sex)
         
@@ -353,11 +357,8 @@ class ISO1999_2023Predictor(BaseNIPTSPredictor):
         except (ValueError, TypeError, AttributeError):
             H = np.nan
         
-        # 检查边界条件
-        if age < 20 or age > 70:
-            nipts_ldq = np.nan
-        if duration < 1 or duration > 40 or age - duration < 20:
-            nipts_ldq = np.nan
+        # 边界条件已在 predict() 方法中处理
+        # age 和 duration 已被调整到有效范围内，无需重复检查
         if LAeq < 70:
             nipts_ldq = np.nan
         if LAeq > 100:

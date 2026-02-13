@@ -41,8 +41,20 @@ class AuditoryDiagnose(BaseModel):
                                   NIPTS_diagnose_strategy: str = "better",
                                   standard: str = "Chinese",
                                   **kwargs):
+        """
+        计算观测到的 NIPTS（噪声性永久阈移）
+        
+        NIPTS_diagnose_strategy 参数说明：
+        - "better": 使用 optimum_ear_data（每个频率独立取更好耳，标准 NIPTS 计算方式）
+        - "left": 使用左耳数据
+        - "right": 使用右耳数据  
+        - "poorer": 使用 poorer_ear_data（整体较差耳）
+        - "mean": 使用 mean_ear_data（两耳平均）
+        """
         if NIPTS_diagnose_strategy == "better":
-            diagnose_ear_data = detection_result.better_ear_data
+            # 使用 optimum_ear_data：每个频率独立取更好耳的值
+            # 这是 NIPTS 观测值的标准计算方式
+            diagnose_ear_data = detection_result.optimum_ear_data
         elif NIPTS_diagnose_strategy == "left":
             diagnose_ear_data = detection_result.left_ear_data
         elif NIPTS_diagnose_strategy == "right":
@@ -87,36 +99,74 @@ class AuditoryDiagnose(BaseModel):
 
     @staticmethod
     def calculate_NIHL(
-        ear_data: Dict[str, float],
+        ear_data: Union[Dict[str, float], "PTAResult"],
         freq_key: str = "346",
         age: Optional[int] = None,
         sex: Optional[str] = None,
-        apply_correction: bool = False
+        apply_correction: bool = False,
+        use_better_ear: bool = True
     ) -> float:
         """
         计算噪声性听力损失(NIHL)指标
         
-        包装 pta_correction.calculate_nihl() 函数
+        支持两种输入格式：
+        1. 字典格式：调用 pta_correction.calculate_nihl() 计算双耳平均
+        2. PTAResult 对象：使用 better_ear_data 计算更好耳平均
         
         Args:
-            ear_data: 双耳听阈数据，格式如 {'left_ear_3000': 25.0, 'right_ear_4000': 30.0, ...}
+            ear_data: 双耳听阈数据，支持两种格式：
+                - Dict: {'left_ear_3000': 25.0, 'right_ear_4000': 30.0, ...}
+                - PTAResult: PTAResult 对象
             freq_key: 频率配置键
                 - "1234": 1000, 2000, 3000, 4000 Hz (言语频率)
                 - "346": 3000, 4000, 6000 Hz (高频)
             age: 年龄（用于年龄校正时必需）
             sex: 性别 'M' 或 'F'（用于年龄校正时必需）
             apply_correction: 是否应用年龄校正
+            use_better_ear: 当输入为 PTAResult 时，是否使用更好耳数据（默认 True）
             
         Returns:
             NIHL 值 (dB)，若数据不足则返回 np.nan
         """
-        return calculate_nihl(
-            ear_data=ear_data,
-            freq_key=freq_key,
-            age=age,
-            sex=sex,
-            apply_correction=apply_correction
-        )
+        from ohtk.detection_info.auditory_detection.PTA_result import PTAResult
+        from ohtk.utils.pta_correction import NIHL_FREQ_CONFIG
+        
+        # 判断输入类型
+        if isinstance(ear_data, PTAResult):
+            # 使用 PTAResult 对象
+            frequencies = NIHL_FREQ_CONFIG.get(freq_key, [3000, 4000, 6000])
+            if use_better_ear:
+                ear_dict = ear_data.better_ear_data or {}
+            else:
+                # 合并左右耳数据
+                ear_dict = {}
+                if ear_data.left_ear_data:
+                    ear_dict.update({f"left_ear_{k}": v for k, v in ear_data.left_ear_data.items()})
+                if ear_data.right_ear_data:
+                    ear_dict.update({f"right_ear_{k}": v for k, v in ear_data.right_ear_data.items()})
+            
+            # 提取指定频率的值
+            values = []
+            for freq in frequencies:
+                # PTAResult 的 better_ear_data 使用频率作为 key
+                if freq in ear_dict:
+                    value = ear_dict[freq]
+                    if value is not None and not (isinstance(value, float) and np.isnan(value)):
+                        if apply_correction and age is not None and sex is not None:
+                            from ohtk.utils.pta_correction import correct_pta_value
+                            value = correct_pta_value(value, age, sex, freq)
+                        values.append(value)
+            
+            return float(np.mean(values)) if values else np.nan
+        else:
+            # 使用字典格式
+            return calculate_nihl(
+                ear_data=ear_data,
+                freq_key=freq_key,
+                age=age,
+                sex=sex,
+                apply_correction=apply_correction
+            )
 
 
     @staticmethod
@@ -161,6 +211,11 @@ class AuditoryDiagnose(BaseModel):
         """
         根据 ISO 1999:2013 标准预测噪声性永久阈移(NIPTS)
         
+        【注意】此方法已废弃，建议使用新架构：
+        from ohtk.diagnose_info.nipts_predictor import get_predictor
+        predictor = get_predictor('iso1999_2013')
+        result = predictor.predict(LAeq=..., age=..., sex=..., duration=...)
+        
         Args:
             LAeq: 等效连续A计权声压级 (dB)
             age: 年龄
@@ -178,62 +233,15 @@ class AuditoryDiagnose(BaseModel):
         Raises:
             ValueError: 当缺少必要数据或无法计算时
         """
-        if mean_key is None:
-            mean_key = [3000, 4000, 6000]
-            
-        # 标准化性别
-        sex_norm = "Male" if str(sex).startswith("M") or sex in ("男", "male") else "Female"
-        age_boxed = AuditoryConstants.AGE_BOXING(age=age)
-        percentrage_str = str(percentrage) + "pr"
-
-        # 获取标准 PTA
-        if standard == "Chinese":
-            standard_PTA = AuditoryConstants.CHINESE_STANDARD_PTA_DICT.get(sex_norm, {}).get(age_boxed)
-        else:
-            standard_PTA = AuditoryConstants.ISO_1999_2013_STANDARD_PTA_DICT.get(sex_norm, {}).get(age_boxed)
+        from ohtk.diagnose_info.nipts_predictor import get_predictor
         
-        if standard_PTA is None:
-            raise ValueError(f"Standard PTA data not found for sex: {sex_norm}, age: {age_boxed}")
-            
-        # 过滤频率
-        standard_PTA = seq(standard_PTA.items()).filter(
-            lambda x: int(x[0].split("Hz")[0]) in mean_key
-        ).map(lambda x: (int(x[0].split("Hz")[0]), x[1])).dict()
-        standard_PTA = seq(standard_PTA.items()).map(
-            lambda x: (x[0], x[1].get(percentrage_str))).dict()
-
-        # 计算预测值
-        NIPTS_preds = []
-        for freq in mean_key:
-            params = AuditoryConstants.ISO_1999_2013_NIPTS_PRED_DICT.get(str(freq) + "Hz", {})
-            u = params.get("u")
-            v = params.get("v")
-            L0 = params.get("L0")
-                
-            if u is None or v is None or L0 is None:
-                logger.warning(f"Missing parameter for frequency {freq}Hz, skipping...")
-                continue
-                
-            if duration < 10:
-                NIPTS_pred = np.log10(duration + 1) / np.log10(11) * (
-                    u + v * np.log10(10 / 1)) * (LAeq - L0)**2
-            else:
-                NIPTS_pred = (u + v * np.log10(duration / 1)) * (LAeq - L0)**2
-
-            if Hs:
-                H = standard_PTA.get(freq)
-                if H is not None:
-                    if NH_limit:
-                        if H + NIPTS_pred > 40:
-                            NIPTS_pred = NIPTS_pred - NIPTS_pred * H / 120
-                    else:
-                        NIPTS_pred = NIPTS_pred - NIPTS_pred * H / 120
-            NIPTS_preds.append(NIPTS_pred)
-            
-        if not NIPTS_preds:
-            raise ValueError("No valid predictions could be calculated")
-            
-        return np.mean(NIPTS_preds)
+        predictor = get_predictor('iso1999_2013')
+        result = predictor.predict(
+            LAeq=LAeq, age=age, sex=sex, duration=duration,
+            percentrage=percentrage, mean_key=mean_key,
+            Hs=Hs, standard=standard, NH_limit=NH_limit
+        )
+        return result.value
 
     @staticmethod
     def predict_NIPTS_iso1999_2023(
@@ -248,6 +256,11 @@ class AuditoryDiagnose(BaseModel):
     ) -> float:
         """
         根据 ISO 1999:2023 标准预测噪声性永久阈移(NIPTS)
+        
+        【注意】此方法已废弃，建议使用新架构：
+        from ohtk.diagnose_info.nipts_predictor import get_predictor
+        predictor = get_predictor('iso1999_2023')
+        result = predictor.predict(LAeq=..., age=..., sex=..., duration=...)
         
         Args:
             LAeq: 等效连续A计权声压级 (dB)
@@ -265,42 +278,15 @@ class AuditoryDiagnose(BaseModel):
         Raises:
             ValueError: 当缺少必要数据或无法计算时
         """
-        if mean_key is None:
-            mean_key = [3000, 4000, 6000]
-
-        # 标准化输入参数
-        age = 21 if age <= 20 else age
-        age = 70 if age > 70 else age
-        duration = 40 if duration > 40 else duration
-        duration = age - 20 if age - duration < 20 else duration
-        sex_str = "Male" if str(sex).startswith("M") or sex in ("男", "male") else "Female"
+        from ohtk.diagnose_info.nipts_predictor import get_predictor
         
-        # 获取插值参数
-        p_idx, p_next_idx, p_ratio = AuditoryDiagnose._get_percentile_indices(percentrage)
-        age_idx, age_next_idx, age_ratio = AuditoryDiagnose._get_age_interpolation_params(age)
-        laeq_idx, laeq_next_idx, laeq_ratio = AuditoryDiagnose._get_laeq_interpolation_params(LAeq)
-        duration_idx, duration_next_idx, duration_ratio = AuditoryDiagnose._get_duration_interpolation_params(duration)
-
-        # 计算预测值
-        nipts_predictions = []
-        for freq in mean_key:
-            nipts_pred = AuditoryDiagnose._calculate_nipts_for_frequency(
-                freq=freq, duration=duration,
-                laeq_idx=laeq_idx, laeq_next_idx=laeq_next_idx, laeq_ratio=laeq_ratio,
-                duration_idx=duration_idx, duration_next_idx=duration_next_idx, duration_ratio=duration_ratio,
-                p_idx=p_idx, p_next_idx=p_next_idx, p_ratio=p_ratio,
-                age_idx=age_idx, age_next_idx=age_next_idx, age_ratio=age_ratio,
-                age=age, sex=sex_str, LAeq=LAeq,
-                extrapolation=extrapolation, NH_limit=NH_limit,
-                percentrage=percentrage, mean_key=mean_key
-            )
-            if not np.isnan(nipts_pred):
-                nipts_predictions.append(nipts_pred)
-
-        if not nipts_predictions:
-            raise ValueError("No valid predictions could be calculated")
-            
-        return np.mean(nipts_predictions)
+        predictor = get_predictor('iso1999_2023')
+        result = predictor.predict(
+            LAeq=LAeq, age=age, sex=sex, duration=duration,
+            percentrage=percentrage, mean_key=mean_key,
+            extrapolation=extrapolation, NH_limit=NH_limit
+        )
+        return result.value
 
     # ============ 私有静态辅助方法 ============
 

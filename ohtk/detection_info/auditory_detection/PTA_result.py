@@ -15,6 +15,7 @@ class PTAResult(PointResult):
     poorer_ear: Optional[str] = None
     poorer_ear_data: Optional[dict] = None
     mean_ear_data: Optional[dict] = None
+    optimum_ear_data: Optional[dict] = None  # 每个频率独立取更好耳的数据
     # mean_key: Union[list, dict] = None
 
     def __init__(self, **data):
@@ -26,6 +27,9 @@ class PTAResult(PointResult):
             self._poorer_filter(**data)
         if self.mean_ear_data is None:
             self._mean_filter(**data)
+        # 始终计算 optimum_ear_data（用于 NIPTS 计算）
+        if self.optimum_ear_data is None:
+            self._calculate_optimum_ear_data()
 
     def _build(self, **kwargs):
         PTA_value_fix = kwargs.get("PTA_value_fix", True)
@@ -222,3 +226,37 @@ class PTAResult(PointResult):
             mean_ear_y.append(np.nanmean((self.left_ear_data.get(
                 freq, np.nan), self.right_ear_data.get(freq, np.nan))))
         self.mean_ear_data = dict(zip(mean_ear_x, mean_ear_y))
+
+    def _calculate_optimum_ear_data(self):
+        """
+        计算最优频率数据（每个频率独立取更好耳的值）
+        
+        这是 NIPTS 观测值计算的标准方法：
+        对于每个频率，从两耳中选取听阈更低（更好）的值。
+        与 better_ear_data 不同，这里每个频率可以来自不同的耳朵。
+        
+        例如：
+        - 3000Hz: 左耳 20dB, 右耳 25dB -> 取 20dB (左耳)
+        - 4000Hz: 左耳 30dB, 右耳 15dB -> 取 15dB (右耳)
+        - 6000Hz: 左耳 25dB, 右耳 10dB -> 取 10dB (右耳)
+        """
+        # 确保已有左右耳数据
+        if self.left_ear_data is None:
+            self.left_ear_data = seq(self.data.items()).filter(lambda x: x[0].startswith(
+                "L")).map(lambda x: (int(x[0].split("-")[1]), float(x[1]))).dict()
+        if self.right_ear_data is None:
+            self.right_ear_data = seq(self.data.items()).filter(lambda x: x[0].startswith(
+                "R")).map(lambda x: (int(x[0].split("-")[1]), float(x[1]))).dict()
+        
+        # 获取所有频率
+        all_freqs = set(self.left_ear_data.keys()) | set(self.right_ear_data.keys())
+        all_freqs = sorted(list(all_freqs))
+        
+        # 每个频率取更好耳的值
+        optimum_y = []
+        for freq in all_freqs:
+            left_val = self.left_ear_data.get(freq, np.nan)
+            right_val = self.right_ear_data.get(freq, np.nan)
+            optimum_y.append(np.nanmin((left_val, right_val)))
+        
+        self.optimum_ear_data = dict(zip(all_freqs, optimum_y))

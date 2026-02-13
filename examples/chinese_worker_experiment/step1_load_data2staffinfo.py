@@ -106,35 +106,64 @@ def build_staff_info_safe(row):
         return None
 
 def calculate_all_metrics(staff, row):
-    """计算所有指标"""
+    """计算所有指标 - 使用 StaffInfo 对象方法"""
     results = {}
     
-    # 1. NIHL 计算
+    # 从 StaffInfo 获取 PTAResult 对象
+    pta = None
+    record_key = None
     try:
-        ear_data = {}
-        freq_map = {
-            'left': {500: 'L-500', 1000: 'L-1000', 2000: 'L-2000', 
-                     3000: 'L-3000', 4000: 'L-4000', 6000: 'L-6000'},
-            'right': {500: 'R-500', 1000: 'R-1000', 2000: 'R-2000',
-                      3000: 'R-3000', 4000: 'R-4000', 6000: 'R-6000'}
-        }
-        
-        for ear, mappings in freq_map.items():
-            for freq, source_col in mappings.items():
-                target_col = f'{ear}_ear_{freq}'
-                val = row.get(source_col)
-                if not pd.isna(val):
-                    ear_data[target_col] = val
-        
-        if ear_data:
+        record_key = staff.get_record_key()
+        if record_key and record_key in staff.staff_health_info:
+            auditory_info = staff.staff_health_info[record_key].auditory
+            if auditory_info and hasattr(auditory_info, '_detection_objects'):
+                pta = auditory_info._detection_objects.get('PTA')
+    except Exception as e:
+        logger.debug(f"获取 PTAResult 失败: {e}")
+    
+    # 1. NIHL 计算 - 优先使用 PTAResult 对象
+    try:
+        if pta is not None:
+            # 使用 PTAResult 对象计算 NIHL（更好耳）
             results['NIHL_346'] = AuditoryDiagnose.calculate_NIHL(
-                ear_data=ear_data, freq_key="346", 
-                age=row.get('age'), sex=row.get('sex'), apply_correction=False
+                ear_data=pta, freq_key="346",
+                age=staff.staff_age, sex=staff.staff_sex, apply_correction=False,
+                use_better_ear=True
             )
             results['NIHL_1234'] = AuditoryDiagnose.calculate_NIHL(
-                ear_data=ear_data, freq_key="1234",
-                age=row.get('age'), sex=row.get('sex'), apply_correction=False
+                ear_data=pta, freq_key="1234",
+                age=staff.staff_age, sex=staff.staff_sex, apply_correction=False,
+                use_better_ear=True
             )
+        else:
+            # 回退到字典格式
+            ear_data = {}
+            freq_map = {
+                'left': {500: 'L-500', 1000: 'L-1000', 2000: 'L-2000', 
+                         3000: 'L-3000', 4000: 'L-4000', 6000: 'L-6000'},
+                'right': {500: 'R-500', 1000: 'R-1000', 2000: 'R-2000',
+                          3000: 'R-3000', 4000: 'R-4000', 6000: 'R-6000'}
+            }
+            
+            for ear, mappings in freq_map.items():
+                for freq, source_col in mappings.items():
+                    target_col = f'{ear}_ear_{freq}'
+                    val = row.get(source_col)
+                    if not pd.isna(val):
+                        ear_data[target_col] = val
+            
+            if ear_data:
+                results['NIHL_346'] = AuditoryDiagnose.calculate_NIHL(
+                    ear_data=ear_data, freq_key="346", 
+                    age=staff.staff_age, sex=staff.staff_sex, apply_correction=False
+                )
+                results['NIHL_1234'] = AuditoryDiagnose.calculate_NIHL(
+                    ear_data=ear_data, freq_key="1234",
+                    age=staff.staff_age, sex=staff.staff_sex, apply_correction=False
+                )
+            else:
+                results['NIHL_346'] = None
+                results['NIHL_1234'] = None
     except Exception as e:
         logger.debug(f"NIHL 计算失败: {e}")
         results['NIHL_346'] = None
@@ -154,6 +183,22 @@ def calculate_all_metrics(staff, row):
         logger.debug(f"NIPTS ISO 2023 计算失败: {e}")
         results['NIPTS_ISO2023'] = None
     
+    # 4. NIPTS 观测值（从听力数据计算）
+    try:
+        if pta is not None:
+            results['NIPTS_observed'] = AuditoryDiagnose.calculate_observed_NIPTS(
+                detection_result=pta,
+                sex=staff.staff_sex,
+                age=staff.staff_age,
+                mean_key=[3000, 4000, 6000],
+                NIPTS_diagnose_strategy="better"
+            )
+        else:
+            results['NIPTS_observed'] = None
+    except Exception as e:
+        logger.debug(f"NIPTS 观测值计算失败: {e}")
+        results['NIPTS_observed'] = None
+    
     return results
 
 def process_data(df):
@@ -167,6 +212,7 @@ def process_data(df):
     nihl_success = 0
     nipts_2013_success = 0
     nipts_2023_success = 0
+    nipts_observed_success = 0
     
     for idx in range(len(df)):
         if idx % 100 == 0:
@@ -190,6 +236,8 @@ def process_data(df):
             nipts_2013_success += 1
         if metrics['NIPTS_ISO2023'] is not None and not np.isnan(metrics['NIPTS_ISO2023']):
             nipts_2023_success += 1
+        if metrics['NIPTS_observed'] is not None and not np.isnan(metrics['NIPTS_observed']):
+            nipts_observed_success += 1
         
         result = {
             'staff_id': staff.staff_id,
@@ -201,6 +249,7 @@ def process_data(df):
             'NIHL_1234': metrics['NIHL_1234'],
             'NIPTS_ISO2013': metrics['NIPTS_ISO2013'],
             'NIPTS_ISO2023': metrics['NIPTS_ISO2023'],
+            'NIPTS_observed': metrics['NIPTS_observed'],
             'original_NIPTS': row.get('NIPTS'),
             'original_NIPTS_pred_2013': row.get('NIPTS_pred_2013'),
             'original_NIPTS_pred_2023': row.get('NIPTS_pred_2023'),
@@ -212,6 +261,7 @@ def process_data(df):
     logger.info(f"  NIHL 计算成功: {nihl_success}/{len(df)} ({nihl_success/len(df)*100:.1f}%)")
     logger.info(f"  NIPTS ISO 2013 计算成功: {nipts_2013_success}/{len(df)} ({nipts_2013_success/len(df)*100:.1f}%)")
     logger.info(f"  NIPTS ISO 2023 计算成功: {nipts_2023_success}/{len(df)} ({nipts_2023_success/len(df)*100:.1f}%)")
+    logger.info(f"  NIPTS 观测值计算成功: {nipts_observed_success}/{len(df)} ({nipts_observed_success/len(df)*100:.1f}%)")
     
     return pd.DataFrame(results)
 
@@ -251,6 +301,37 @@ def compare_results(results_df):
         logger.info(f"\nNIHL 统计 (有效行数: {len(valid_nihl)}):")
         logger.info(f"  均值: {valid_nihl['NIHL_346'].mean():.2f}")
         logger.info(f"  范围: [{valid_nihl['NIHL_346'].min():.2f}, {valid_nihl['NIHL_346'].max():.2f}]")
+    
+    # NIPTS 观测值 vs 预测值对比
+    valid_observed = results_df[results_df['NIPTS_observed'].notna()]
+    if len(valid_observed) > 0:
+        logger.info(f"\nNIPTS 观测值统计 (有效行数: {len(valid_observed)}):")
+        logger.info(f"  均值: {valid_observed['NIPTS_observed'].mean():.2f}")
+        logger.info(f"  范围: [{valid_observed['NIPTS_observed'].min():.2f}, {valid_observed['NIPTS_observed'].max():.2f}]")
+        
+        # 当前观测值 vs 之前的观测值
+        compare_observed = valid_observed[valid_observed['original_NIPTS'].notna()]
+        if len(compare_observed) > 0:
+            diff_observed = compare_observed['NIPTS_observed'] - compare_observed['original_NIPTS']
+            logger.info(f"\nNIPTS 观测值 vs 之前观测值 (有效行数: {len(compare_observed)}):")
+            logger.info(f"  平均差异: {diff_observed.mean():.2f}")
+            logger.info(f"  相关系数: {compare_observed['NIPTS_observed'].corr(compare_observed['original_NIPTS']):.4f}")
+            
+        # 观测值 vs ISO 2013 预测
+        compare_2013 = valid_observed[valid_observed['NIPTS_ISO2013'].notna()]
+        if len(compare_2013) > 0:
+            diff_obs_2013 = compare_2013['NIPTS_observed'] - compare_2013['NIPTS_ISO2013']
+            logger.info(f"\nNIPTS 观测值 vs ISO 2013 预测 (有效行数: {len(compare_2013)}):")
+            logger.info(f"  平均差异: {diff_obs_2013.mean():.2f}")
+            logger.info(f"  相关系数: {compare_2013['NIPTS_observed'].corr(compare_2013['NIPTS_ISO2013']):.4f}")
+        
+        # 观测值 vs ISO 2023 预测
+        compare_2023 = valid_observed[valid_observed['NIPTS_ISO2023'].notna()]
+        if len(compare_2023) > 0:
+            diff_obs_2023 = compare_2023['NIPTS_observed'] - compare_2023['NIPTS_ISO2023']
+            logger.info(f"\nNIPTS 观测值 vs ISO 2023 预测 (有效行数: {len(compare_2023)}):")
+            logger.info(f"  平均差异: {diff_obs_2023.mean():.2f}")
+            logger.info(f"  相关系数: {compare_2023['NIPTS_observed'].corr(compare_2023['NIPTS_ISO2023']):.4f}")
 
 def save_results(results_df):
     """保存结果"""
@@ -278,12 +359,17 @@ def save_results(results_df):
             'original_NIPTS_pred_2023': row['original_NIPTS_pred_2023'],
             'calculated_NIHL_346': row['NIHL_346'],
             'calculated_NIHL_1234': row['NIHL_1234'],
+            'calculated_NIPTS_observed': row['NIPTS_observed'],
             'calculated_NIPTS_ISO2013': row['NIPTS_ISO2013'],
             'calculated_NIPTS_ISO2023': row['NIPTS_ISO2023'],
             'diff_NIPTS_2013': row['NIPTS_ISO2013'] - row['original_NIPTS_pred_2013'] 
                 if pd.notna(row['NIPTS_ISO2013']) and pd.notna(row['original_NIPTS_pred_2013']) else None,
             'diff_NIPTS_2023': row['NIPTS_ISO2023'] - row['original_NIPTS_pred_2023']
                 if pd.notna(row['NIPTS_ISO2023']) and pd.notna(row['original_NIPTS_pred_2023']) else None,
+            'diff_observed_vs_2013': row['NIPTS_observed'] - row['NIPTS_ISO2013']
+                if pd.notna(row['NIPTS_observed']) and pd.notna(row['NIPTS_ISO2013']) else None,
+            'diff_observed_vs_2023': row['NIPTS_observed'] - row['NIPTS_ISO2023']
+                if pd.notna(row['NIPTS_observed']) and pd.notna(row['NIPTS_ISO2023']) else None,
         }
         report_data.append(report_row)
     
