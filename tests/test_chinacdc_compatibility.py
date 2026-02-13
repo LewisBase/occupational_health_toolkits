@@ -496,7 +496,7 @@ class TestAuditoryDiagnose:
             "left_ear_6000": 45.0, "right_ear_6000": 50.0,
         }
         
-        nihl = AuditoryDiagnose.NIHL(ear_data, freq_key="346")
+        nihl = AuditoryDiagnose.calculate_NIHL(ear_data, freq_key="346")
         expected = np.mean([25, 30, 35, 40, 45, 50])
         assert abs(nihl - expected) < 0.01
     
@@ -512,7 +512,7 @@ class TestAuditoryDiagnose:
             "left_ear_6000": 30.0, "right_ear_6000": 30.0,
         }
         
-        result = AuditoryDiagnose.NIHL_all(ear_data)
+        result = AuditoryDiagnose.calculate_all_NIHL(ear_data)
         assert "1234" in result
         assert "346" in result
 

@@ -156,6 +156,38 @@ analysis_df = StaffInfo.to_analysis_dataframe_batch(staff_dict)
 StaffInfo.help()
 ```
 
+#### 数据加载列名规范
+
+使用 `StaffInfo.load_from_dataframe()` 或 `StaffInfo.load_batch_from_dataframe()` 加载数据时，需要遵守以下列名规范：
+
+**必需字段：**
+
+| 字段名 | 说明 | 示例值 |
+|--------|------|--------|
+| `staff_id` / `worker_id` | 员工唯一标识 | "EMP001" |
+| `name` | 员工姓名 | "张三" |
+| `sex` / `gender` | 性别 | "Male"/"Female" 或 "男"/"女" |
+| `age` | 年龄（岁） | 35 |
+| `duration` | 接噪工龄（年） | 10 |
+| `creation_date` / `check_date` | 检查日期 | "2024-01-15" |
+| `LAeq` | 等效连续A计权声压级（dB） | 85.0 |
+
+**听力检测数据字段（PTA）：**
+
+| 左耳字段 | 右耳字段 | 说明 |
+|----------|----------|------|
+| `L-500` / `left_ear_500` | `R-500` / `right_ear_500` | 500Hz 听阈 |
+| `L-1000` / `left_ear_1000` | `R-1000` / `right_ear_1000` | 1000Hz 听阈 |
+| `L-2000` / `left_ear_2000` | `R-2000` / `right_ear_2000` | 2000Hz 听阈 |
+| `L-3000` / `left_ear_3000` | `R-3000` / `right_ear_3000` | 3000Hz 听阈 |
+| `L-4000` / `left_ear_4000` | `R-4000` / `right_ear_4000` | 4000Hz 听阈 |
+| `L-6000` / `left_ear_6000` | `R-6000` / `right_ear_6000` | 6000Hz 听阈 |
+
+**重要提示：**
+- 对于 NIHL/NIPTS 计算，**L-3000, L-4000, L-6000, R-3000, R-4000, R-6000** 是关键必需字段
+- 建议在加载数据前过滤掉这些关键频率为空的记录
+- 字段名支持多种格式（如 `L-500` 或 `left_ear_500`），系统会自动识别
+
 ### NIPTS 预测
 
 ```python

@@ -4,7 +4,7 @@ from ohtk.diagnose_info.auditory_diagnose import AuditoryDiagnose
 
 class AuditoryNametoObject():
     DETECTION_TYPE_DICT = {"PTA": PTAResult, "ABR": ABRResult}
-    DIAGNOSE_TYPE_DICT = {"PTA": AuditoryDiagnose.NIPTS}
+    DIAGNOSE_TYPE_DICT = {"PTA": AuditoryDiagnose}  # 使用 AuditoryDiagnose 类
 
 
 class PhysicalExamItems():

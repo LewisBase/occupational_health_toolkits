@@ -1,0 +1,54 @@
+# 中国工人噪声暴露数据分析实验配置
+
+experiment_name: "chinese_worker_nihl_nipts_analysis"
+
+data:
+  file_path: "examples/data/All_Chinese_worker_exposure_data_0401.xlsx"
+  use_staffinfo: true
+
+features:
+  feature_columns: null  # null表示自动推断
+  categorical_columns: null  # null表示自动检测
+  fill_missing: true
+  scale_features: true
+
+models:
+  - name: "LightGBM"
+    type: "lightgbm"
+    params:
+      num_leaves: 31
+      learning_rate: 0.05
+      n_estimators: 100
+      max_depth: -1
+      min_child_samples: 20
+      
+  # TabTransformer 暂时禁用（参数问题待修复）
+  # - name: "TabTransformer"
+  #   type: "tabtransformer"
+  #   params:
+  #     dim: 32
+  #     depth: 6
+  #     heads: 8
+  #     dim_head: 16
+  #     mlp_hidden_mults: [4, 2]
+  #     mlp_act: "relu"
+
+targets:
+  - "NIHL_1234"
+  - "NIHL_346"
+  - "NIPTS_1234"
+  - "NIPTS_346"
+
+training:
+  n_folds: 5
+  test_size: 0.2
+  random_state: 42
+
+evaluation:
+  metrics: ["rmse", "mae", "mape", "r2", "medae"]
+  compare_with_iso: true
+
+output:
+  dir: "examples/chinese_worker_experiment/results"
+  save_models: true
+  generate_report: true
