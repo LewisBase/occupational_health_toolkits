@@ -109,7 +109,6 @@ OCCUPATIONAL_HEALTH_TOOLKITS/
 │       ├── data_helper.py
 │       ├── database_helper.py
 │       ├── decorators.py
-│       ├── plot_helper.py
 │       ├── queue_data.py             # 队列数据处理
 │       └── pta_correction.py         # PTA 校正与 NIHL 标签转换
 │
@@ -305,16 +304,49 @@ python -m pytest tests/ -v
 
 ## 依赖
 
+### 运行时（精简版，14 个核心包）
+
 - Python >= 3.8
-- PyTorch >= 1.9
-- pandas
-- numpy
-- pydantic >= 2.0
-- loguru
-- scikit-learn
-- statsmodels
-- lightgbm
-- lifelines
+- numpy >= 1.20
+- pandas >= 1.3
+- scipy >= 1.7
+- scikit-learn >= 1.0
+- matplotlib >= 3.5
+- statsmodels >= 0.13
+- lightgbm >= 3.3
+- einops >= 0.7
+- mlxtend >= 0.23, < 0.24
+- torch >= 2.0
+- pydantic >= 2.0, < 3.0
+- loguru >= 0.6
+- pyfunctional >= 1.5
+- tqdm >= 4.60
+
+### 可选 extras
+
+```bash
+# 训练 demo（titanic 教学脚本）需要
+pip install -e ".[training_demo]"     # catboost + torchmetrics
+
+# 完整可视化工具集（需配合 ohtk/utils/plot_helper.py，目前为死代码）
+pip install -e ".[plot]"              # prophet + plotly + seaborn
+
+# 开发依赖
+pip install -e ".[dev]"               # pytest/black/flake8/isort/mypy
+
+# 全部
+pip install -e ".[all]"
+```
+
+### 精简说明
+
+相比旧版 `requirements.txt`（19 项含 4 个过松/过紧的版本固定），本次精简：
+
+- **移除** `prophet` / `plotly` / `seaborn` — `ohtk/utils/plot_helper.py` 0 处引用，文件已归档
+- **移到 `[training_demo]`** `catboost` / `torchmetrics` — 只在 titanic demo 内部 lazy import
+- **移除** `setuptools` — 构建期依赖，应在 `pyproject.toml [build-system]`
+- **修正** `lightgbm` 漏列、版本固定过死（`pydantic==2.11.7` → `>=2.0,<3.0`、`torch==2.7.1` → `>=2.0`）
+- **重命名** `scikit_learn` → `scikit-learn`（PyPI canonical）
 
 ## 许可证
 

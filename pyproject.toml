@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,28 +11,39 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "catboost",
-    "einops==0.8.1",
-    "loguru",
-    "matplotlib",
-    "mlxtend==0.23.4",
-    "numpy",
-    "pandas",
-    "plotly==6.1.2",
-    "prophet",
-    "pydantic==2.11.7",
-    "pyfunctional==1.5.0",
-    "scikit_learn",
-    "scipy",
-    "seaborn",
-    "setuptools==78.1.1",
-    "statsmodels",
-    "torch==2.7.1",
-    "torchmetrics==1.7.3",
-    "tqdm",
+    # 数值与数据
+    "numpy>=1.20",
+    "pandas>=1.3",
+    "scipy>=1.7",
+    "scikit-learn>=1.0",
+    # 可视化
+    "matplotlib>=3.5",
+    # 建模 / 统计
+    "statsmodels>=0.13",
+    "lightgbm>=3.3",
+    "einops>=0.7",
+    "mlxtend>=0.23,<0.24",
+    "torch>=2.0",
+    # 配置 / 工具
+    "pydantic>=2.0,<3.0",
+    "loguru>=0.6",
+    "pyfunctional>=1.5",
+    "tqdm>=4.60",
 ]
 
 [project.optional-dependencies]
+# 训练 demo（titanic 教学示例）需要
+training_demo = [
+    "catboost>=1.0",
+    "torchmetrics>=1.0",
+]
+# 完整可视化工具集（plot_helper.py 复活时才用）
+plot = [
+    "prophet>=1.1",
+    "plotly>=5.0",
+    "seaborn>=0.11",
+]
+# 开发
 dev = [
     "pytest",
     "pytest-cov",
@@ -40,6 +51,10 @@ dev = [
     "flake8",
     "isort",
     "mypy",
+]
+# 全部可选依赖
+all = [
+    "ohtk[training_demo,plot,dev]",
 ]
 
 [tool.black]
